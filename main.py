@@ -10,12 +10,15 @@ big_image_buffer = [
     bytearray(ONE_BUFFER_SIZE),
     bytearray(ONE_BUFFER_SIZE)
 ]
-final_image_buffer = bytearray(ONE_BUFFER_SIZE)
+# final_image_buffer = bytearray(ONE_BUFFER_SIZE)
 
 #(160*144 image) * (2 bit per pixel) // (8 bit per byte)
-GB_BUFFER_SIZE = 5760
-gb_image_buffer = bytearray(GB_BUFFER_SIZE)
+GB_TILE_BUFFER_SIZE = 5760
+gb_tile_buffer = bytearray(GB_TILE_BUFFER_SIZE)
 
+#(160*144 image)
+GB_BUFFER_SIZE = 23040
+gb_image_buffer = bytearray(GB_BUFFER_SIZE)
 
 print('making buffer data...')
 for t in range(4):
@@ -34,4 +37,5 @@ def main():
 
 
 if __name__ == '__main__':
+    print('hello!')
     main()
