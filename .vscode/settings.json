@@ -6,12 +6,27 @@
     "python.languageServer": "Pylance",
     "python.analysis.typeCheckingMode": "basic",
     "python.analysis.extraPaths": [
-        ".vscode\\Pico-W-Stub\\stubs"
+        ".vscode\\Pico-W-Stub\\stubs",
+        ".vscode\\Pico-W-Stub"
     ],
-    "picowgo.syncFolder": "",
-    "picowgo.openOnStart": true,
-    "picowgo.syncFileTypes": "py,txt,bin",
-
-    "editor.rulers": [79]
-
+    "editor.rulers": [
+        79
+    ],
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none"
+    },
+    "micropico.syncFolder": "",
+    "micropico.openOnStart": true,
+    "micropico.syncFileTypes": [
+        "py",
+        "txt",
+        "log",
+        "json",
+        "xml",
+        "html",
+        "js",
+        "css",
+        "mpy",
+        "bin"
+    ]
 }

@@ -5,14 +5,22 @@ class PrinterInterface:
 
     def __init__(self):
         self.uart = UART(0, baudrate=115200, tx=Pin(0), rx=Pin(1))
+
+    def init_printer(self): 
+        self.uart.write(bytes([27, 64]))
+        time.sleep(.1)
     
     def print_text(self, text: str):
         text_bytes = bytes(text, 'utf-8')
         self.uart.write(text_bytes)
+        self.uart.write(bytes([10])) #line feed
+        time.sleep(.1)
+        self.print()
+        time.sleep(.1)
 
     def print(self):
         #                      GS   (  L   pL  pH   m  fn
-        self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
+        return self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
     
     def send_graphics_data(
         self, payload: bytearray, x: int, y: int, color: int = 0,
@@ -58,6 +66,8 @@ class PrinterInterface:
         yL = y % 256
         yH = y // 256
 
+    
+
         self.uart.write(bytes([
         #   GS '8'  L   p1  p2  p3  p4  m   fn  a  kc1  kc2, b, xL, xH, yL, yH
             29, 56, 76, p1, p2, p3, p4, 48, 83, a, kc1, kc2, b, xL, xH, yL, yH
@@ -86,3 +96,4 @@ class PrinterInterface:
                 feed_height #n feed height
             ]) 
         self.uart.write(cut_cmd)
+        time.sleep(.1)

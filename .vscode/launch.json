@@ -1,7 +1,5 @@
 {
     "configurations": [
-        
-
         {
             "name": "Send to Pi Pico",
             "type": "python",
