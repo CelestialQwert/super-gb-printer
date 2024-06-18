@@ -3,14 +3,6 @@ from machine import UART, Pin
 import printer_interface
 
 ROWS = 32
-# gfx = bytearray([0]*(ROWS*64))
-# for y in range(ROWS):
-#     for x in range(64):
-#         i = y*64+x
-#         if (y%16 > 7):
-#             gfx[i] = 255 if (x%2) else 0
-#         else:
-#             gfx[i] = 0 if (x%2) else 255
 gfx = bytearray([0]*(ROWS*64))
 for y in range(ROWS):
     for x in range(64):
@@ -38,7 +30,7 @@ def main():
     printface = printer_interface.PrinterInterface()
     printface.print_text('Hello there!\n\n')
     printface.print_text('123456789012345678901234567890123456789012\n')
-    printface.print_text('              5     7  8                 F\n')
+    printface.print_text('              5  6  7  8                 F\n')
 
     printface.send_graphics_data(gfx, 512, ROWS)
     printface.print()

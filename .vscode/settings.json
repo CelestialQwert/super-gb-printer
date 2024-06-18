@@ -9,9 +9,6 @@
         ".vscode\\Pico-W-Stub\\stubs",
         ".vscode\\Pico-W-Stub"
     ],
-    "editor.rulers": [
-        79
-    ],
     "python.analysis.diagnosticSeverityOverrides": {
         "reportMissingModuleSource": "none"
     },
