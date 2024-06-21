@@ -17,7 +17,7 @@ tones = [
     bytearray(TONE_ROWS*64),
 ]
 
-for t in range(4):
+for t in [3]]:
     for y in range(TONE_ROWS):
         for x in range(64):
             i = y*64+x
@@ -28,7 +28,7 @@ DARK = bytearray([255]*(TONE_ROWS*64))
 
 def main():
     printface = printer_interface.PrinterInterface()
-    printface.print_text('Hello there!\n\n')
+    printface.print_text('Hello there!\n')
     printface.print_text('123456789012345678901234567890123456789012\n')
     printface.print_text('              5  6  7  8                 F\n')
 

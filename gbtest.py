@@ -1,15 +1,16 @@
 import time
-import printer_interface
+import utime
+from collections import namedtuple
+from machine import UART, Pin
+from ulab import numpy as np
 
+import printer_interface
 
 # gb_tile = bytearray([
 #     0xff, 0x00, 0x7e, 0xff, 0x85, 0x81, 0x89, 0x83, 
 #     0x93, 0x85, 0xa5, 0x8b, 0xc9, 0x97, 0x7e, 0xff
 # ]*20*18)
 
-from machine import UART, Pin
-
-import printer_interface
 
 TILES_PER_BIG_ROW = 20
 ROWS_PER_TILE = 8
@@ -20,7 +21,7 @@ BYTES_PER_BIG_ROW = TILES_PER_BIG_ROW * BYTES_PER_TILE
 PIXELS_PER_ROW = 8
 
 WIDTH = 160
-BIG_ROWS = 18
+BIG_ROWS = 36
 TILE_HEIGHT = 8
 BITS_PER_BYTE = 8
 ZOOM = 3
@@ -29,116 +30,126 @@ HEIGHT = BIG_ROWS * TILE_HEIGHT
 WIDTH_BYTES = WIDTH * ZOOM // BITS_PER_BYTE
 PRINTER_BUFFER_SIZE = WIDTH_BYTES * HEIGHT * ZOOM_V
 GB_BUFFER_SIZE = WIDTH * HEIGHT // BITS_PER_BYTE
-print('buffer size', PRINTER_BUFFER_SIZE)
 
 WHITE = 0
 LIGHTGRAY = 1
 DARKGRAY = 2
 BLACK = 3
 
-tone_image_buffer = [
-    bytearray(PRINTER_BUFFER_SIZE), # value 8
-    bytearray(PRINTER_BUFFER_SIZE), # value 4
-    bytearray(PRINTER_BUFFER_SIZE), # value 2
-    bytearray(PRINTER_BUFFER_SIZE)  # value 1
-]
-color_image_buffer = [
-    bytearray(1),                   # WHITE (buffer not needed)
-    bytearray(PRINTER_BUFFER_SIZE), # LIGHT GRAY
-    bytearray(PRINTER_BUFFER_SIZE), # DARK GRAY 
-    bytearray(PRINTER_BUFFER_SIZE)  # BLACK
-]
+"""
+conversions between color and tone
 
+white - 0
+lightgray - 7 (1/2/4)
+darkgray - 9 (1/8)
+black - 15 (1/2/4/8)
 
+tone 49 (8) - black, darkgray, lightgray
+tone 50 (4) - black, lightgray
+tone 51 (2) - black, lightgray
+tone 52 (1) - black, darkgray
+"""
+
+def timeit(f, *args, **kwargs):
+    func_name = str(f).split(' ')[1]
+    def new_func(*args, **kwargs):
+        t = utime.ticks_us()
+        result = f(*args, **kwargs)
+        micros = utime.ticks_diff(utime.ticks_us(), t)
+        print(f'execution time: {micros/1000000} s')
+        return result
+    return new_func
+
+ToneImageBuffer = namedtuple(
+    'ToneImageBuffer',
+    ['tone49', 'tone50', 'tone51', 'tone52']
+)
+
+tib_shape = (HEIGHT, WIDTH_BYTES)
+
+tone_image_buffer = ToneImageBuffer(
+    np.zeros(tib_shape, dtype=np.uint8), # tone 49, value 8
+    np.zeros(tib_shape, dtype=np.uint8), # tone 50, value 4
+    np.zeros(tib_shape, dtype=np.uint8), # tone 51, value 2
+    np.zeros(tib_shape, dtype=np.uint8)  # tone 52, value 1
+)
+
+def zoom_with_zero(n):
+    if not n:
+        return n
+    else:
+        return (2**ZOOM) * zoom_with_zero(n // 2) + (n % 2)
+
+zoomed_lut = np.zeros((256,ZOOM), dtype=np.uint8)
+for i in range(256):
+    zoomed_lut[i] = np.frombuffer(
+        (zoom_with_zero(i) * 7).to_bytes(3, 'big'),
+        dtype=np.uint8
+    )
+# print(zoomed_lut)
+# crash
+
+@timeit
 def prep(gb_tile):
 
-    num_rows_of_tiles = len(gb_tile) // BYTES_PER_BIG_ROW
+    num_rows_of_tiles = gb_tile.shape[0] // BYTES_PER_BIG_ROW
 
-    for big_row in range(BIG_ROWS): # iterate over rows of tiles
+    for big_row in range(num_rows_of_tiles): # iterate over rows of tiles
         print('big row', big_row)
         for tile_idx in range(TILES_PER_BIG_ROW): # then each tile
-            for tile_row in range(ROWS_PER_TILE): # then each row in a tile
-
-                # find location of byte to process in gb tile data
-                byte_pos = (
+            tile_pos = (
                     big_row * BYTES_PER_BIG_ROW
                     + tile_idx * BYTES_PER_TILE
-                    + tile_row * BYTES_PER_ROW
                 )
+            
+            # each row is two bytes, little endian
+            lbytes = gb_tile[tile_pos     : tile_pos + BYTES_PER_TILE     : 2]
+            hbytes = gb_tile[tile_pos + 1 : tile_pos + BYTES_PER_TILE + 1 : 2]
+            
+            # white     = ~lbytes & ~hbytes
+            lightgray_tile =  lbytes & ~hbytes
+            darkgray_tile  = ~lbytes &  hbytes
+            black_tile     =  lbytes &  hbytes
 
-                # each row is two bytes, little endian
-                lbyte = gb_tile[byte_pos]
-                hbyte = gb_tile[byte_pos + 1]
-                
-                # refactor into list of 8 pixels, 0 (white) to 3 (black)
-                llist = [int(x) for x in '{:08b}'.format(lbyte)]
-                hlist = [int(x) for x in '{:08b}'.format(hbyte)]
-                tlist = [l+2*h for l, h in zip(llist, hlist)]
+            tiles = [lightgray_tile, darkgray_tile, black_tile]
 
-                # make a buffer of 8 pixels for each of the 4 colors
-                row_buffer = [[0]*8, [0]*8, [0]*8, [0]*8]
+            lightgray_zoomed =  np.zeros((8, ZOOM), dtype=np.uint8)
+            darkgray_zoomed =  np.zeros((8, ZOOM), dtype=np.uint8)
+            black_zoomed =  np.zeros((8, ZOOM), dtype=np.uint8)
 
-                # for each pixel, mark the corresponding pixel in that color 
-                # buffer
-                for px, color in enumerate(tlist):
-                    row_buffer[color][px] = 1
-                
-                # loop over the three non-white colors to turn each pixel 
-                # buffer into a bytearray with a length equal to horiz zoom
-                for c in range(1, 4):
-                    print_bytes = 0
-                    for px in range(PIXELS_PER_ROW):
-                        print_bytes = print_bytes << ZOOM
-                        if row_buffer[c][px]:
-                            print_bytes += (2**ZOOM - 1)
-                    print_bytearray = print_bytes.to_bytes(ZOOM, 'big')
-                    # loop once for each vertical zoom
-                    for row in range(ZOOM_V):
-                        # find location of row pixels in color buffer
-                        start_byte = (
-                            big_row * ZOOM_V * WIDTH_BYTES * ROWS_PER_TILE
-                            + tile_row * ZOOM_V * WIDTH_BYTES 
-                            + row * WIDTH_BYTES 
-                            + tile_idx * ZOOM
-                        )
-                        # add the pixels to that color buffer
-                        color_image_buffer[c][start_byte:start_byte+ZOOM] = print_bytearray
-    
-    for byte in range(PRINTER_BUFFER_SIZE): 
-        tone_image_buffer[0][byte] = (
-            color_image_buffer[DARKGRAY][byte] 
-            | color_image_buffer[BLACK][byte]
-        )
-        tone_image_buffer[1][byte] = (
-            color_image_buffer[LIGHTGRAY][byte] 
-            | color_image_buffer[BLACK][byte]
-        )
-        tone_image_buffer[2][byte] = (
-            color_image_buffer[LIGHTGRAY][byte] 
-            | color_image_buffer[BLACK][byte]
-        )
-        tone_image_buffer[3][byte] = (
-            color_image_buffer[LIGHTGRAY][byte] 
-            | color_image_buffer[DARKGRAY][byte] 
-            | color_image_buffer[BLACK][byte]
-        )
+            for r in range(ROWS_PER_TILE):
+                lightgray_zoomed[r] = zoomed_lut[lightgray_tile[r]]
+                darkgray_zoomed[r] = zoomed_lut[darkgray_tile[r]]
+                black_zoomed[r] = zoomed_lut[black_tile[r]]
+            
+            tone49_tile = black_zoomed | darkgray_zoomed 
+            tone50_tile = black_zoomed | lightgray_zoomed 
+            tone51_tile = black_zoomed | lightgray_zoomed 
+            tone52_tile = black_zoomed | darkgray_zoomed | lightgray_zoomed 
+
+            trow = big_row * ROWS_PER_TILE
+            tcol = tile_idx * ZOOM
+
+            tone_image_buffer.tone49[trow:trow+8, tcol:tcol+3] = tone49_tile
+            tone_image_buffer.tone50[trow:trow+8, tcol:tcol+3] = tone50_tile
+            tone_image_buffer.tone51[trow:trow+8, tcol:tcol+3] = tone51_tile
+            tone_image_buffer.tone52[trow:trow+8, tcol:tcol+3] = tone52_tile
 
         
 def main():
 
-    with open('bulbasaur.bin', 'rb') as f:
-        pic1 = f.read()
-    with open('bulbasaur2.bin', 'rb') as f:
-        pic2 = f.read()
+    with open('certificate.bin', 'rb') as f:
+        pic = np.frombuffer(f.read(), dtype=np.uint8)
 
     printface = printer_interface.PrinterInterface()
     
-    for pic in [pic1]:
-        prep(pic)
-        
-        printface.send_download_graphics_data(
-            tone_image_buffer, WIDTH * ZOOM, HEIGHT * ZOOM_V)
-        printface.print_download_graphics_data()
+    prep(pic)
+
+    printface.init_printer()
+    printface.set_justification(1)
+    printface.send_download_graphics_data(
+        tone_image_buffer, WIDTH*ZOOM, HEIGHT, ZOOM_V)
+    printface.print_download_graphics_data()
 
     printface.cut()
 
