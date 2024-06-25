@@ -17,19 +17,13 @@ ROWS_PER_TILE = 8
 BYTES_PER_ROW = 2
 BYTES_PER_TILE = ROWS_PER_TILE * BYTES_PER_ROW
 BYTES_PER_BIG_ROW = TILES_PER_BIG_ROW * BYTES_PER_TILE
-
 PIXELS_PER_ROW = 8
-
 WIDTH = 160
 BIG_ROWS = 36
 TILE_HEIGHT = 8
 BITS_PER_BYTE = 8
-ZOOM = 3
-ZOOM_V = 3
 HEIGHT = BIG_ROWS * TILE_HEIGHT
-WIDTH_BYTES = WIDTH * ZOOM // BITS_PER_BYTE
-PRINTER_BUFFER_SIZE = WIDTH_BYTES * HEIGHT * ZOOM_V
-GB_BUFFER_SIZE = WIDTH * HEIGHT // BITS_PER_BYTE
+WIDTH_BYTES = WIDTH // BITS_PER_BYTE
 
 WHITE = 0
 LIGHTGRAY = 1
@@ -60,12 +54,14 @@ def timeit(f, *args, **kwargs):
         return result
     return new_func
 
+
 ToneImageBuffer = namedtuple(
     'ToneImageBuffer',
     ['tone49', 'tone50', 'tone51', 'tone52']
 )
 
 tib_shape = (HEIGHT, WIDTH_BYTES)
+
 
 tone_image_buffer = ToneImageBuffer(
     np.zeros(tib_shape, dtype=np.uint8), # tone 49, value 8
@@ -74,20 +70,6 @@ tone_image_buffer = ToneImageBuffer(
     np.zeros(tib_shape, dtype=np.uint8)  # tone 52, value 1
 )
 
-def zoom_with_zero(n):
-    if not n:
-        return n
-    else:
-        return (2**ZOOM) * zoom_with_zero(n // 2) + (n % 2)
-
-zoomed_lut = np.zeros((256,ZOOM), dtype=np.uint8)
-for i in range(256):
-    zoomed_lut[i] = np.frombuffer(
-        (zoom_with_zero(i) * 7).to_bytes(3, 'big'),
-        dtype=np.uint8
-    )
-# print(zoomed_lut)
-# crash
 
 @timeit
 def prep(gb_tile):
@@ -112,28 +94,19 @@ def prep(gb_tile):
             black_tile     =  lbytes &  hbytes
 
             tiles = [lightgray_tile, darkgray_tile, black_tile]
-
-            lightgray_zoomed =  np.zeros((8, ZOOM), dtype=np.uint8)
-            darkgray_zoomed =  np.zeros((8, ZOOM), dtype=np.uint8)
-            black_zoomed =  np.zeros((8, ZOOM), dtype=np.uint8)
-
-            for r in range(ROWS_PER_TILE):
-                lightgray_zoomed[r] = zoomed_lut[lightgray_tile[r]]
-                darkgray_zoomed[r] = zoomed_lut[darkgray_tile[r]]
-                black_zoomed[r] = zoomed_lut[black_tile[r]]
             
-            tone49_tile = black_zoomed | darkgray_zoomed 
-            tone50_tile = black_zoomed | lightgray_zoomed 
-            tone51_tile = black_zoomed | lightgray_zoomed 
-            tone52_tile = black_zoomed | darkgray_zoomed | lightgray_zoomed 
+            tone49_tile = black_tile | darkgray_tile 
+            tone50_tile = black_tile | lightgray_tile 
+            tone51_tile = black_tile | lightgray_tile 
+            tone52_tile = black_tile | darkgray_tile | lightgray_tile 
 
             trow = big_row * ROWS_PER_TILE
-            tcol = tile_idx * ZOOM
+            tcol = tile_idx
 
-            tone_image_buffer.tone49[trow:trow+8, tcol:tcol+3] = tone49_tile
-            tone_image_buffer.tone50[trow:trow+8, tcol:tcol+3] = tone50_tile
-            tone_image_buffer.tone51[trow:trow+8, tcol:tcol+3] = tone51_tile
-            tone_image_buffer.tone52[trow:trow+8, tcol:tcol+3] = tone52_tile
+            tone_image_buffer.tone49[trow:trow+8, tcol] = tone49_tile
+            tone_image_buffer.tone50[trow:trow+8, tcol] = tone50_tile
+            tone_image_buffer.tone51[trow:trow+8, tcol] = tone51_tile
+            tone_image_buffer.tone52[trow:trow+8, tcol] = tone52_tile
 
         
 def main():
@@ -147,8 +120,7 @@ def main():
 
     printface.init_printer()
     printface.set_justification(1)
-    printface.send_download_graphics_data(
-        tone_image_buffer, WIDTH*ZOOM, HEIGHT, ZOOM_V)
+    printface.send_download_graphics_data(tone_image_buffer, 3)
     printface.print_download_graphics_data()
 
     printface.cut()

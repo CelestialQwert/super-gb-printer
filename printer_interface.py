@@ -1,25 +1,18 @@
 from machine import UART, Pin
 from ulab import numpy as np
 import time
+import utime
 
-TILES_PER_BIG_ROW = 20
-ROWS_PER_TILE = 8
-BYTES_PER_ROW = 2
-BYTES_PER_TILE = ROWS_PER_TILE * BYTES_PER_ROW
-BYTES_PER_BIG_ROW = TILES_PER_BIG_ROW * BYTES_PER_TILE
 
-PIXELS_PER_ROW = 8
-
-WIDTH = 160
-BIG_ROWS = 18
-TILE_HEIGHT = 8
-BITS_PER_BYTE = 8
-ZOOM = 3
-ZOOM_V = 3
-HEIGHT = BIG_ROWS * TILE_HEIGHT
-WIDTH_BYTES = WIDTH * ZOOM // BITS_PER_BYTE
-PRINTER_BUFFER_SIZE = WIDTH_BYTES * HEIGHT * ZOOM_V
-GB_BUFFER_SIZE = WIDTH * HEIGHT // BITS_PER_BYTE
+def timeit(f, *args, **kwargs):
+    func_name = str(f).split(' ')[1]
+    def new_func(*args, **kwargs):
+        t = utime.ticks_us()
+        result = f(*args, **kwargs)
+        micros = utime.ticks_diff(utime.ticks_us(), t)
+        print(f'execution time: {micros/1000000} s')
+        return result
+    return new_func
 
 def wait():
     time.sleep(.001)
@@ -30,17 +23,17 @@ def stretch_with_zero(n, stretch):
     else:
         return (2**stretch) * stretch_with_zero(n // 2, stretch) + (n % 2)
 
-# zoomed_lut = {
-#     2: np.zeros((256, 2), dtype=np.uint8),
-#     3: np.zeros((256, 3), dtype=np.uint8),
-#     4: np.zeros((256, 4), dtype=np.uint8),
-# }
-# for i in range(256):
-#     for zoom, single_lut in zoomed_lut.items():
-#         single_lut[i] = np.frombuffer(
-#             (stretch_with_zero(i, zoom) * (2**zoom - 1)).to_bytes(zoom, 'big'),
-#             dtype=np.uint8
-#         )
+zoomed_lut = {
+    2: np.zeros((256, 2), dtype=np.uint8),
+    3: np.zeros((256, 3), dtype=np.uint8),
+    4: np.zeros((256, 4), dtype=np.uint8),
+}
+for i in range(256):
+    for zoom, single_lut in zoomed_lut.items():
+        single_lut[i] = np.frombuffer(
+            (stretch_with_zero(i, zoom) * (2**zoom - 1)).to_bytes(zoom, 'big'),
+            dtype=np.uint8
+        )
 
 class PrinterInterface:
 
@@ -93,36 +86,47 @@ class PrinterInterface:
         self.uart.write(payload)
         wait()
     
+    @timeit
     def send_download_graphics_data(
-        self, full_payload: list[np.ndarray], x: int, y: int, zoom_v: int, 
+        self, full_payload: list[np.ndarray], zoom_x: int=1, zoom_y: int=None, 
         keycode: str = 'GB', 
     ):
         first_tone_size = full_payload[0].shape
         for tone_payload in full_payload:
             if tone_payload.shape != first_tone_size:
-                raise ValueError('Data for different colors is different sizes!')
+                raise ValueError('Data for different tones is different sizes!')
+        y, x = first_tone_size
+        if not zoom_y:
+            zoom_y = zoom_x
 
-        self.send_download_graphics_data_header(x, y, zoom_v)
+        self.send_download_graphics_data_header(x * zoom_x, y * zoom_y)
+
+        tile_row_buffer = np.zeros(x * zoom_x, dtype=np.uint8)
 
         print('Sending dl data...')
         for i, tone_payload in enumerate(full_payload):
             print(f"sending tone {i}")
             self.send_tone_number(i)
-            for row in range(tone_payload.shape[0]):
-                for z in range(zoom_v):
-                    self.uart.write(tone_payload[row,:].tobytes())
+            for row in range(y):
+                if not row % 16:
+                    print(f"Row {row}")
+                if zoom_x > 1:
+                    for px in range(x):
+                        pos = x*zoom_x
+                        tile_row_buffer[px*zoom_x:(px+1)*zoom_x] = (
+                            zoomed_lut[zoom_x][tone_payload[row,px]]
+                        )
+                else:
+                    tile_row_buffer = tone_payload[row,:]
+                for z in range(zoom_y):
+                    self.uart.write(tile_row_buffer.tobytes())
                     wait()
         print('done')
 
     def send_download_graphics_data_header(
-        self, x: int, y: int, zoom_v: int, num_tones: int=4, keycode: str='GB'
+        self, x: int, y: int, num_tones: int=4, keycode: str='GB'
     ):
-
-        if x % 8 or y % 8:
-            raise ValueError('Dimensions x and y must be multiple of 8!')
-
-        one_color_size = x * y * zoom_v // 8
-        real_y = y * zoom_v
+        one_color_size = x * y 
         kc1, kc2 = [ord(x) for x in keycode]
         b = num_tones
         a = 48 if b == 1 else 52
@@ -131,10 +135,10 @@ class PrinterInterface:
         p2 = (p // 256) % 256
         p3 = (p // 65536) % 256
         p4 = (p // 16777216)
-        xL = x % 256
-        xH = x // 256
-        yL = real_y % 256
-        yH = real_y // 256
+        xL = (x*8) % 256
+        xH = (x*8) // 256
+        yL = y % 256
+        yH = y // 256
 
         self.uart.write(bytes([
         # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lparen_cl_fn83.html
