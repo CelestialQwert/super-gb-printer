@@ -1,0 +1,15 @@
+{
+    "folders": [
+        {
+            "path": ".."
+        }
+    ],
+    "settings": {
+        "python.analysis.typeshedPaths": [
+            "~/.micropico-stubs/micropython-rp2-rpi_pico-stubs==1.23.0.post1"
+        ],
+        "python.analysis.extraPaths": [
+            "~/.micropico-stubs/micropython-rp2-rpi_pico-stubs==1.23.0.post1"
+        ]
+    }
+}

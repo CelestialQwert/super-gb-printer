@@ -155,4 +155,4 @@ cython_debug/
 Pico-W-Stub
 .picowgo
 venv_picoprint
-
+.micropico-stubs
