@@ -59,7 +59,6 @@ class GBPacket():
         self.checksum = 0
         self.calc_checksum = 0
 
-
 class GBLink:
     def __init__(self):
         self.bytes_received = 0
@@ -78,6 +77,7 @@ class GBLink:
         self.packet_idx = 0
         self.current_packet = self.packets[self.packet_idx]
         self.got_packet = False
+        self.data_buffer = np.zeros((9, 0x280), dtype=np.uint8)
         self.rx_byte = 0
         self.tx_byte = 0
         self.status = 0
@@ -98,7 +98,6 @@ class GBLink:
             self.packet_wait_start = utime.ticks_us()
             while not self.got_packet:
                 pass
-            self.packet_end = utime.ticks_us()
             self.handle_packet()
             self.got_packet = False
 
@@ -178,24 +177,33 @@ class GBLink:
         elif self.state == STATE_RESPONSE_PARTIAL:
             self.state = STATE_IDLE
             self.got_packet = True
+            self.packet_end = utime.ticks_us()
+            packet_time = (self.packet_end-self.packet_start)
+            packet_spacing = (self.packet_start-self.packet_wait_start)
+            print(
+                f'Packet type: {self.current_packet.command}, '
+                f'Send time: {packet_time} us '
+                f'Time since last packet: {packet_spacing} us',
+                f'Print ticks: {self.fake_print_ticks}',
+            )
 
         self.sm.put(self.tx_byte)
 
     def handle_packet(self):
-        packet_time = (self.packet_end-self.packet_start)
-        packet_spacing = (self.packet_start-self.packet_wait_start)
-        print(
-            f'Packet type: {self.current_packet.command}, '
-            f'Send time: {packet_time} us '
-            f'Time since last packet: {packet_spacing} us',
-            f'Print ticks: {self.fake_print_ticks}',
-        )
-        if self.current_packet.command == COMMAND_DATA:
+        if self.current_packet.command == COMMAND_INIT:
+            self.status = 0x00
+            self.packet_idx  = 0
+            self.current_packet = self.packets[self.packet_idx]
+        elif self.current_packet.command == COMMAND_DATA:
             self.packet_idx += 1
             self.current_packet = self.packets[self.packet_idx]
         elif self.current_packet.command == COMMAND_PRINT:
             self.status = 0x06
             self.fake_print_ticks = 20
+            self.copy_data()
+        elif self.current_packet.command == COMMAND_BREAK:
+            self.status = 0x00
+            self.packet_idx = 0
         elif (
             self.current_packet.command == COMMAND_STATUS
             and self.status == 0x06
@@ -203,10 +211,14 @@ class GBLink:
             self.fake_print_ticks -= 1
             if self.fake_print_ticks == 0:
                 self.status = 0x00
-                self.packet_idx = 0
+                # self.packet_idx = 0
                 self.current_packet = self.packets[self.packet_idx]
         
-        
+    def copy_data(self):
+        for i in range(9):
+            self.data_buffer[i,:] = self.packets[i].data
+            print(f"Page {i} copied to buffer")
+
 
 
 link = GBLink()

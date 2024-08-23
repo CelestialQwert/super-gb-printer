@@ -1,6 +1,5 @@
 from machine import UART, Pin
 from ulab import numpy as np
-import time
 import utime
 
 
@@ -15,7 +14,7 @@ def timeit(f, *args, **kwargs):
     return new_func
 
 def wait():
-    time.sleep(.001)
+    utime.sleep(.001)
 
 def stretch_with_zero(n, stretch):
     if not n:
