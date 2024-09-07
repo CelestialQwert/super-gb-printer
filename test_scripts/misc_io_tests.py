@@ -109,3 +109,21 @@ st = utime.ticks_us()
 h2 = gb_packet.header_type
 en = utime.ticks_us()
 print(f"Class time: {en-st} us")
+
+bb = bytearray(0x280)
+rr = arr = np.ones((9, 0x280), dtype=np.uint8)
+st = utime.ticks_us()
+rr[0,:] = bb
+en = utime.ticks_us()
+print(f"Copy to numpy array time: {en-st} us")
+
+dd = rp2.DMA()
+c = d.pack_ctrl()  # Just use the default control value.
+# The count is in 'transfers', which defaults to four-byte words, so divide length by 4
+st = utime.ticks_us()
+d.config(read=bb, write=rr[3,:], count=len(bb)//4, ctrl=c, trigger=True)
+# Wait for completion
+while d.active():
+    pass
+en = utime.ticks_us()
+print(f"Numpy DMA time: {en-st} us")

@@ -1,9 +1,9 @@
-import time
 import rp2
 import utime
 from micropython import const
 from machine import Pin
 from ulab import numpy as np
+import sys
 
 
 STATE_IDLE = const(0)
@@ -55,7 +55,6 @@ class GBPacket():
         self.compression_flag = 0
         self.data_length = 0
         self.data = bytearray(0x280)
-        # self.data = np.zeros(0x280, dtype=np.uint8)
         self.checksum = 0
         self.calc_checksum = 0
 
@@ -71,16 +70,20 @@ class GBLink:
             sideset_base=Pin(25),
             freq = int(1e6)
         )
-        self.state = STATE_IDLE
+        self.packet_state = STATE_IDLE
         self.remaining_bytes = 0
-        self.packets = [GBPacket() for _ in range(12)]
-        self.packet_idx = 0
-        self.current_packet = self.packets[self.packet_idx]
-        self.got_packet = False
+        self.packet = GBPacket()
+        self.complete_packet = False
         self.data_buffer = np.zeros((9, 0x280), dtype=np.uint8)
+        self.pages_received = 0
         self.rx_byte = 0
         self.tx_byte = 0
-        self.status = 0
+        self.printer_status = 0
+
+        self.dma = rp2.DMA()
+        self.dma_ctrl = self.dma.pack_ctrl()
+
+        # timing info
         self.packet_wait_start = 0
         self.packet_end = 0
         self.packet_start = 0
@@ -96,10 +99,10 @@ class GBLink:
     def run(self):
         while True:
             self.packet_wait_start = utime.ticks_us()
-            while not self.got_packet:
+            while not self.complete_packet:
                 pass
             self.handle_packet()
-            self.got_packet = False
+            self.complete_packet = False
 
     def old_gb_interrupt(self, mach):
         bite = mach.get()
@@ -119,100 +122,106 @@ class GBLink:
     def process_byte(self):
         self.tx_byte = 0x00
 
-        if self.state == STATE_IDLE:
+        if self.packet_state == STATE_IDLE:
             self.tx_byte = 0x00
             if self.rx_byte == 0x88:
-                self.state = STATE_MAGICBYTES_PARTIAL
+                self.packet_state = STATE_MAGICBYTES_PARTIAL
                 self.packet_start = utime.ticks_us()
 
-        elif self.state == STATE_MAGICBYTES_PARTIAL:
+        elif self.packet_state == STATE_MAGICBYTES_PARTIAL:
             if self.rx_byte == 0x33:
-                self.state = STATE_HEADER
+                self.packet_state = STATE_HEADER
                 self.remaining_bytes = 4
             else:
-                self.state = STATE_IDLE
+                self.packet_state = STATE_IDLE
 
-        elif self.state == STATE_HEADER:
+        elif self.packet_state == STATE_HEADER:
             self.remaining_bytes -= 1
             if self.remaining_bytes == 3:
-                self.current_packet.command = self.rx_byte
-                # self.current_packet.calc_checksum += self.rx_byte
+                self.packet.command = self.rx_byte
+                # self.packet.calc_checksum += self.rx_byte
             elif self.remaining_bytes == 2:
-                self.current_packet.compression_flag = self.rx_byte
-                # self.current_packet.calc_checksum += self.rx_byte
+                self.packet.compression_flag = self.rx_byte
+                # self.packet.calc_checksum += self.rx_byte
             elif self.remaining_bytes == 1:
-                self.current_packet.data_length = self.rx_byte
-                # self.current_packet.calc_checksum += self.rx_byte
+                self.packet.data_length = self.rx_byte
+                # self.packet.calc_checksum += self.rx_byte
             else:
-                self.current_packet.data_length += self.rx_byte * 256
-                # self.current_packet.calc_checksum += self.rx_byte
-                if self.current_packet.data_length:
-                    self.state = STATE_PAYLOAD
-                    self.remaining_bytes = self.current_packet.data_length
+                self.packet.data_length += self.rx_byte * 256
+                # self.packet.calc_checksum += self.rx_byte
+                if self.packet.data_length:
+                    self.packet_state = STATE_PAYLOAD
+                    self.remaining_bytes = self.packet.data_length
                 else:
-                    self.state = STATE_CHECKSUM
+                    self.packet_state = STATE_CHECKSUM
                     self.remaining_bytes = 2
         
-        elif self.state == STATE_PAYLOAD:
-            idx = self.current_packet.data_length - self.remaining_bytes
+        elif self.packet_state == STATE_PAYLOAD:
+            idx = self.packet.data_length - self.remaining_bytes
             self.remaining_bytes -= 1
-            self.current_packet.data[idx] = self.rx_byte
+            self.packet.data[idx] = self.rx_byte
             if self.remaining_bytes == 0:
-                self.state = STATE_CHECKSUM
+                self.packet_state = STATE_CHECKSUM
                 self.remaining_bytes = 2
         
-        elif self.state == STATE_CHECKSUM:
+        elif self.packet_state == STATE_CHECKSUM:
             self.remaining_bytes -= 1
             if self.remaining_bytes == 1:
-                self.current_packet.checksum = self.rx_byte
+                self.packet.checksum = self.rx_byte
             else:
-                self.current_packet.checksum += self.rx_byte * 256
-                self.state = STATE_RESPONSE_READY
+                self.packet.checksum += self.rx_byte * 256
+                self.packet_state = STATE_RESPONSE_READY
                 self.tx_byte = 0x81 # first response byte
         
-        elif self.state == STATE_RESPONSE_READY:
-            self.state = STATE_RESPONSE_PARTIAL
-            self.tx_byte = self.status
+        elif self.packet_state == STATE_RESPONSE_READY:
+            self.packet_state = STATE_RESPONSE_PARTIAL
+            self.tx_byte = self.printer_status
 
-        elif self.state == STATE_RESPONSE_PARTIAL:
-            self.state = STATE_IDLE
-            self.got_packet = True
+        elif self.packet_state == STATE_RESPONSE_PARTIAL:
+            self.packet_state = STATE_IDLE
+            self.complete_packet = True
             self.packet_end = utime.ticks_us()
             packet_time = (self.packet_end-self.packet_start)
             packet_spacing = (self.packet_start-self.packet_wait_start)
             print(
-                f'Packet type: {self.current_packet.command}, '
-                f'Send time: {packet_time} us '
-                f'Time since last packet: {packet_spacing} us',
+                f'Packet type: {self.packet.command}, '
+                f'Send time: {packet_time} us, '
+                f'Time between packets: {packet_spacing} us, ',
                 f'Print ticks: {self.fake_print_ticks}',
             )
 
         self.sm.put(self.tx_byte)
 
     def handle_packet(self):
-        if self.current_packet.command == COMMAND_INIT:
-            self.status = 0x00
-            self.packet_idx  = 0
-            self.current_packet = self.packets[self.packet_idx]
-        elif self.current_packet.command == COMMAND_DATA:
-            self.packet_idx += 1
-            self.current_packet = self.packets[self.packet_idx]
-        elif self.current_packet.command == COMMAND_PRINT:
-            self.status = 0x06
+        if self.packet.command == COMMAND_INIT:
+            self.printer_status = 0x00
+            self.pages_received = 0
+        elif self.packet.command == COMMAND_DATA:
+            if self.pages_received >= 9:
+                print('Full but received data page')
+            else:
+                self.dma.config(
+                    read = self.packet.data,
+                    write = self.data_buffer[self.pages_received,:],
+                    count = len(self.packet.data) // 4,
+                    ctrl = self.dma_ctrl,
+                    trigger = True
+                )
+            print('copying data page to buffer')
+            self.pages_received += 1
+        elif self.packet.command == COMMAND_PRINT:
+            self.printer_status = 0x06
             self.fake_print_ticks = 20
-            self.copy_data()
-        elif self.current_packet.command == COMMAND_BREAK:
-            self.status = 0x00
-            self.packet_idx = 0
+        elif self.packet.command == COMMAND_BREAK:
+            self.printer_status = 0x00
+            self.pages_received = 0
         elif (
-            self.current_packet.command == COMMAND_STATUS
-            and self.status == 0x06
+            self.packet.command == COMMAND_STATUS
+            and self.printer_status == 0x06
         ):
             self.fake_print_ticks -= 1
             if self.fake_print_ticks == 0:
-                self.status = 0x00
-                # self.packet_idx = 0
-                self.current_packet = self.packets[self.packet_idx]
+                self.printer_status = 0x00
         
     def copy_data(self):
         for i in range(9):
