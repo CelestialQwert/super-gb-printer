@@ -5,6 +5,8 @@ from machine import Pin
 from ulab import numpy as np
 import sys
 
+import print_proto
+
 
 STATE_IDLE = const(0)
 STATE_MAGICBYTES_PARTIAL = const(1)
@@ -212,6 +214,7 @@ class GBLink:
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = 0x06
             self.fake_print_ticks = 20
+            print_proto.print_pic(self.data_buffer.reshape(-1))
         elif self.packet.command == COMMAND_BREAK:
             self.printer_status = 0x00
             self.pages_received = 0
@@ -222,12 +225,6 @@ class GBLink:
             self.fake_print_ticks -= 1
             if self.fake_print_ticks == 0:
                 self.printer_status = 0x00
-        
-    def copy_data(self):
-        for i in range(9):
-            self.data_buffer[i,:] = self.packets[i].data
-            print(f"Page {i} copied to buffer")
-
 
 
 link = GBLink()

@@ -19,7 +19,7 @@ BYTES_PER_TILE = ROWS_PER_TILE * BYTES_PER_ROW
 BYTES_PER_BIG_ROW = TILES_PER_BIG_ROW * BYTES_PER_TILE
 PIXELS_PER_ROW = 8
 WIDTH = 160
-BIG_ROWS = 36
+BIG_ROWS = 18
 TILE_HEIGHT = 8
 BITS_PER_BYTE = 8
 HEIGHT = BIG_ROWS * TILE_HEIGHT
@@ -111,9 +111,11 @@ def prep(gb_tile):
         
 def main():
 
-    with open('certificate.bin', 'rb') as f:
+    with open('pic_bins/mario.bin', 'rb') as f:
         pic = np.frombuffer(f.read(), dtype=np.uint8)
+    print_pic(pic)
 
+def print_pic(pic):
     printface = printer_interface.PrinterInterface()
     
     prep(pic)
