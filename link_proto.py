@@ -7,6 +7,16 @@ import sys
 
 import print_proto
 
+def timeit(f, *args, **kwargs):
+    func_name = str(f).split(' ')[1]
+    def new_func(*args, **kwargs):
+        t = utime.ticks_us()
+        result = f(*args, **kwargs)
+        micros = utime.ticks_diff(utime.ticks_us(), t)
+        print(f'{func_name} execution time: {micros} us')
+        return result
+    return new_func
+
 
 STATE_IDLE = const(0)
 STATE_MAGICBYTES_PARTIAL = const(1)
@@ -61,9 +71,15 @@ class GBPacket():
         self.calc_checksum = 0
 
 class GBLink:
+    @timeit
     def __init__(self):
         self.bytes_received = 0
         # CLOCK PIN 5, ENTERED MANUALLY IN PROGRAM ABOVE
+        self.pmach = print_proto.PrintMachine()
+        # with open('pic_bins/mario.bin', 'rb') as f:
+        #     pic = np.frombuffer(f.read(), dtype=np.uint8)
+        #     self.pmach.gbtile_to_tones(pic)
+    
         self.sm = rp2.StateMachine(
             0, gb_link, 
             in_base=Pin(2),
@@ -85,6 +101,8 @@ class GBLink:
         self.dma = rp2.DMA()
         self.dma_ctrl = self.dma.pack_ctrl()
 
+        self.ready_to_realprint = False
+
         # timing info
         self.packet_wait_start = 0
         self.packet_end = 0
@@ -95,6 +113,7 @@ class GBLink:
         self.sm.irq(self.gb_interrupt)
         self.sm.active(1)
         self.sm.put(0x00)
+        print('ready!')
         self.run()
         self.sm.active(0)
     
@@ -104,31 +123,38 @@ class GBLink:
             while not self.complete_packet:
                 pass
             self.handle_packet()
+            if self.ready_to_realprint:
+                self.sm.active(0)
+                self.reshaped = self.data_buffer.reshape(-1)
+                self.pmach.gbtile_to_tones(self.reshaped)
+                self.pmach.print_from_buffer()
+                self.ready_to_realprint = False
+                self.sm.active(1)
             self.complete_packet = False
 
     def old_gb_interrupt(self, mach):
+        print(utime.ticks_us())
         bite = mach.get()
         self.bytes_received += 1
         if self.bytes_received % 2:
             mach.put(0x40)
         else:
             mach.put(0x81)
-        print(f'Received byte {bite:08x}')
+        # print(f'Received byte {bite:02x}')
 
     def gb_interrupt(self, mach):
         self.rx_byte = mach.get() # & 0xFF
         # print(f'IRQ Received byte {self.rx_byte:02x}')
         # print(f'Had sent {self.tx_byte:02x}')
-        self.process_byte()
-            
-    def process_byte(self):
+
         self.tx_byte = 0x00
 
         if self.packet_state == STATE_IDLE:
-            self.tx_byte = 0x00
             if self.rx_byte == 0x88:
                 self.packet_state = STATE_MAGICBYTES_PARTIAL
                 self.packet_start = utime.ticks_us()
+            else:
+                print('bad!')
 
         elif self.packet_state == STATE_MAGICBYTES_PARTIAL:
             if self.rx_byte == 0x33:
@@ -136,6 +162,7 @@ class GBLink:
                 self.remaining_bytes = 4
             else:
                 self.packet_state = STATE_IDLE
+                print('Bad two!')
 
         elif self.packet_state == STATE_HEADER:
             self.remaining_bytes -= 1
@@ -182,25 +209,28 @@ class GBLink:
         elif self.packet_state == STATE_RESPONSE_PARTIAL:
             self.packet_state = STATE_IDLE
             self.complete_packet = True
-            self.packet_end = utime.ticks_us()
-            packet_time = (self.packet_end-self.packet_start)
-            packet_spacing = (self.packet_start-self.packet_wait_start)
-            print(
-                f'Packet type: {self.packet.command}, '
-                f'Send time: {packet_time} us, '
-                f'Time between packets: {packet_spacing} us, ',
-                f'Print ticks: {self.fake_print_ticks}',
-            )
+            # print('packet done')
+            self.packet_end = utime.ticks_us()                
 
         self.sm.put(self.tx_byte)
 
     def handle_packet(self):
+        # packet_time = (self.packet_end-self.packet_start)
+        # packet_spacing = (self.packet_start-self.packet_wait_start)
+        print(
+            f'Packet type: {self.packet.command}, '
+            # f'Send time: {packet_time} us, '
+            # f'Time between packets: {packet_spacing} us, '
+            f'Printer status: {self.printer_status}, '
+            f'Print ticks: {self.fake_print_ticks}' 
+        )
+
         if self.packet.command == COMMAND_INIT:
             self.printer_status = 0x00
             self.pages_received = 0
         elif self.packet.command == COMMAND_DATA:
-            if self.pages_received >= 9:
-                print('Full but received data page')
+            if self.packet.data_length == 0:
+                print('Received stop data packet')
             else:
                 self.dma.config(
                     read = self.packet.data,
@@ -209,22 +239,23 @@ class GBLink:
                     ctrl = self.dma_ctrl,
                     trigger = True
                 )
-            print('copying data page to buffer')
-            self.pages_received += 1
+                # print('copying data page to buffer')
+                self.pages_received += 1
+                self.printer_status = 0x08
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = 0x06
-            self.fake_print_ticks = 20
-            print_proto.print_pic(self.data_buffer.reshape(-1))
+            self.fake_print_ticks = 10
         elif self.packet.command == COMMAND_BREAK:
             self.printer_status = 0x00
             self.pages_received = 0
-        elif (
-            self.packet.command == COMMAND_STATUS
-            and self.printer_status == 0x06
-        ):
-            self.fake_print_ticks -= 1
-            if self.fake_print_ticks == 0:
+        elif self.packet.command == COMMAND_STATUS:
+            if self.printer_status == 0x06:
+                self.fake_print_ticks -= 1
+                if self.fake_print_ticks == 0:
+                    self.printer_status = 0x04
+            elif self.printer_status == 0x04:
                 self.printer_status = 0x00
+                self.ready_to_realprint = True
 
 
 link = GBLink()

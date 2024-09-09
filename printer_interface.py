@@ -9,7 +9,7 @@ def timeit(f, *args, **kwargs):
         t = utime.ticks_us()
         result = f(*args, **kwargs)
         micros = utime.ticks_diff(utime.ticks_us(), t)
-        print(f'execution time: {micros/1000000} s')
+        print(f'{func_name} execution time: {micros/1000000} s')
         return result
     return new_func
 
@@ -27,12 +27,16 @@ zoomed_lut = {
     3: np.zeros((256, 3), dtype=np.uint8),
     4: np.zeros((256, 4), dtype=np.uint8),
 }
-for i in range(256):
-    for zoom, single_lut in zoomed_lut.items():
-        single_lut[i] = np.frombuffer(
-            (stretch_with_zero(i, zoom) * (2**zoom - 1)).to_bytes(zoom, 'big'),
-            dtype=np.uint8
-        )
+@timeit
+def make_lut():
+    global zoomed_lut
+    for i in range(256):
+        for zoom, single_lut in zoomed_lut.items():
+            single_lut[i] = np.frombuffer(
+                (stretch_with_zero(i, zoom) * (2**zoom - 1)).to_bytes(zoom, 'big'),
+                dtype=np.uint8
+            )
+make_lut()
 
 class PrinterInterface:
 
@@ -108,7 +112,7 @@ class PrinterInterface:
             self.send_tone_number(i)
             for row in range(y):
                 if not row % 16:
-                    print(f"Row {row}")
+                    print(f"Row {row}, mticks {utime.ticks_ms()}")
                 if zoom_x > 1:
                     for px in range(x):
                         pos = x*zoom_x
@@ -118,6 +122,9 @@ class PrinterInterface:
                 else:
                     tile_row_buffer = tone_payload[row,:]
                 for z in range(zoom_y):
+                    # for b in tile_row_buffer:
+                    #     self.uart.write(bytes([b]))
+                    #     wait()
                     self.uart.write(tile_row_buffer.tobytes())
                     wait()
         print('done')

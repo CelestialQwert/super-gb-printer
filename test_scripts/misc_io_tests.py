@@ -127,3 +127,10 @@ while d.active():
     pass
 en = utime.ticks_us()
 print(f"Numpy DMA time: {en-st} us")
+
+
+data_buffer = np.zeros((9, 0x280), dtype=np.uint8)
+st = utime.ticks_us()
+data_buffer.reshape(-1)
+en = utime.ticks_us()
+print(f"Reshape time: {en-st} us")
