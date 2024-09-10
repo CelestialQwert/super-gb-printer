@@ -1,9 +1,11 @@
 import rp2
 import utime
-from micropython import const
-from machine import Pin
 from ulab import numpy as np
 import sys
+
+from machine import I2C, Pin
+from micropython import const
+from lcd_i2c import LCD
 
 import print_proto
 
@@ -108,6 +110,11 @@ class GBLink:
         self.packet_end = 0
         self.packet_start = 0
         self.fake_print_ticks = 0
+
+        i2c = I2C(0, scl=Pin(21), sda=Pin(20), freq=300000)
+        self.lcd = LCD(addr=0x27, cols=16, rows=2, i2c=i2c)
+        self.lcd.begin()
+        self.lcd.clear()
     
     def startup(self):
         self.sm.irq(self.gb_interrupt)
@@ -239,12 +246,17 @@ class GBLink:
                     ctrl = self.dma_ctrl,
                     trigger = True
                 )
+                if self.pages_received == 0:
+                    self.lcd.clear()
+                    self.lcd.print('Receiving data...')
                 # print('copying data page to buffer')
                 self.pages_received += 1
                 self.printer_status = 0x08
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = 0x06
             self.fake_print_ticks = 10
+            self.lcd.clear()
+            self.lcd.print('Fake printing...')
         elif self.packet.command == COMMAND_BREAK:
             self.printer_status = 0x00
             self.pages_received = 0
