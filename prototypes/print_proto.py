@@ -76,39 +76,39 @@ class PrintMachine:
     @timeit
     def gbtile_to_tones(self, gb_tile):
 
-            num_rows_of_tiles = gb_tile.shape[0] // BYTES_PER_BIG_ROW
+        num_rows_of_tiles = gb_tile.shape[0] // BYTES_PER_BIG_ROW
 
-            for big_row in range(num_rows_of_tiles): # iterate over rows of tiles
-                print('big row', big_row)
-                for tile_idx in range(TILES_PER_BIG_ROW): # then each tile
-                    tile_pos = (
-                            big_row * BYTES_PER_BIG_ROW
-                            + tile_idx * BYTES_PER_TILE
-                        )
-                    
-                    # each row is two bytes, little endian
-                    lbytes = gb_tile[tile_pos   : tile_pos+BYTES_PER_TILE   : 2]
-                    hbytes = gb_tile[tile_pos+1 : tile_pos+BYTES_PER_TILE+1 : 2]
-                    
-                    # white     = ~lbytes & ~hbytes
-                    lightgray_tile =  lbytes & ~hbytes
-                    darkgray_tile  = ~lbytes &  hbytes
-                    black_tile     =  lbytes &  hbytes
+        for big_row in range(num_rows_of_tiles): # iterate over rows of tiles
+            print('big row', big_row)
+            for tile_idx in range(TILES_PER_BIG_ROW): # then each tile
+                tile_pos = (
+                        big_row * BYTES_PER_BIG_ROW
+                        + tile_idx * BYTES_PER_TILE
+                    )
+                
+                # each row is two bytes, little endian
+                lbytes = gb_tile[tile_pos   : tile_pos+BYTES_PER_TILE   : 2]
+                hbytes = gb_tile[tile_pos+1 : tile_pos+BYTES_PER_TILE+1 : 2]
+                
+                # white     = ~lbytes & ~hbytes
+                lightgray_tile =  lbytes & ~hbytes
+                darkgray_tile  = ~lbytes &  hbytes
+                black_tile     =  lbytes &  hbytes
 
-                    tiles = [lightgray_tile, darkgray_tile, black_tile]
-                    
-                    tone49_tile = black_tile | darkgray_tile 
-                    tone50_tile = black_tile | lightgray_tile 
-                    tone51_tile = black_tile | lightgray_tile 
-                    tone52_tile = black_tile | darkgray_tile | lightgray_tile 
+                tiles = [lightgray_tile, darkgray_tile, black_tile]
+                
+                tone49_tile = black_tile | darkgray_tile 
+                tone50_tile = black_tile | lightgray_tile 
+                tone51_tile = black_tile | lightgray_tile 
+                tone52_tile = black_tile | darkgray_tile | lightgray_tile 
 
-                    trow = big_row * ROWS_PER_TILE
-                    tcol = tile_idx
+                trow = big_row * ROWS_PER_TILE
+                tcol = tile_idx
 
-                    self.tone_image_buffer.tone49[trow:trow+8, tcol] = tone49_tile
-                    self.tone_image_buffer.tone50[trow:trow+8, tcol] = tone50_tile
-                    self.tone_image_buffer.tone51[trow:trow+8, tcol] = tone51_tile
-                    self.tone_image_buffer.tone52[trow:trow+8, tcol] = tone52_tile
+                self.tone_image_buffer.tone49[trow:trow+8, tcol] = tone49_tile
+                self.tone_image_buffer.tone50[trow:trow+8, tcol] = tone50_tile
+                self.tone_image_buffer.tone51[trow:trow+8, tcol] = tone51_tile
+                self.tone_image_buffer.tone52[trow:trow+8, tcol] = tone52_tile
 
     def print_from_buffer(self):
         self.printface.set_justification(1)

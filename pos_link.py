@@ -2,16 +2,7 @@ from machine import UART, Pin
 from ulab import numpy as np
 import utime
 
-
-def timeit(f, *args, **kwargs):
-    func_name = str(f).split(' ')[1]
-    def new_func(*args, **kwargs):
-        t = utime.ticks_us()
-        result = f(*args, **kwargs)
-        micros = utime.ticks_diff(utime.ticks_us(), t)
-        print(f'{func_name} execution time: {micros/1000000} s')
-        return result
-    return new_func
+import timeit
 
 def wait():
     utime.sleep(.001)
@@ -27,7 +18,7 @@ zoomed_lut = {
     3: np.zeros((256, 3), dtype=np.uint8),
     4: np.zeros((256, 4), dtype=np.uint8),
 }
-@timeit
+@timeit.timeit
 def make_lut():
     global zoomed_lut
     for i in range(256):
@@ -38,10 +29,10 @@ def make_lut():
             )
 make_lut()
 
-class PrinterInterface:
+class POSLink:
 
-    def __init__(self):
-        self.uart = UART(0, baudrate=115200, tx=Pin(0), rx=Pin(1))
+    def __init__(self, tx_pin=0, rx_pin=0):
+        self.uart = UART(0, baudrate=115200, tx=Pin(tx_pin), rx=Pin(rx_pin))
 
     def init_printer(self): 
         #                      ESC  @
@@ -64,7 +55,7 @@ class PrinterInterface:
 
     def print(self):
         #                             GS  (   L   pL  pH   m  fn
-        return self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
+        self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
         wait()
     
     def send_graphics_data(
@@ -89,9 +80,9 @@ class PrinterInterface:
         self.uart.write(payload)
         wait()
     
-    @timeit
+    @timeit.timeit
     def send_download_graphics_data(
-        self, full_payload: list[np.ndarray], zoom_x: int=1, zoom_y: int=None, 
+        self, full_payload: list[np.ndarray], zoom_x: int=1, zoom_y: int=0, 
         keycode: str = 'GB', 
     ):
         first_tone_size = full_payload[0].shape
@@ -99,12 +90,14 @@ class PrinterInterface:
             if tone_payload.shape != first_tone_size:
                 raise ValueError('Data for different tones is different sizes!')
         y, x = first_tone_size
-        if not zoom_y:
+        if zoom_y == 0:
             zoom_y = zoom_x
 
         self.send_download_graphics_data_header(x * zoom_x, y * zoom_y)
 
         tile_row_buffer = np.zeros(x * zoom_x, dtype=np.uint8)
+
+        tile_row_buffer.copy()
 
         print('Sending dl data...')
         for i, tone_payload in enumerate(full_payload):
@@ -112,19 +105,15 @@ class PrinterInterface:
             self.send_tone_number(i)
             for row in range(y):
                 if not row % 16:
-                    print(f"Row {row}, mticks {utime.ticks_ms()}")
+                    print(f"Row {row}")
                 if zoom_x > 1:
                     for px in range(x):
-                        pos = x*zoom_x
                         tile_row_buffer[px*zoom_x:(px+1)*zoom_x] = (
                             zoomed_lut[zoom_x][tone_payload[row,px]]
                         )
                 else:
                     tile_row_buffer = tone_payload[row,:]
-                for z in range(zoom_y):
-                    # for b in tile_row_buffer:
-                    #     self.uart.write(bytes([b]))
-                    #     wait()
+                for _ in range(zoom_y):
                     self.uart.write(tile_row_buffer.tobytes())
                     wait()
         print('done')

@@ -15,10 +15,9 @@ def timeit(f, *args, **kwargs):
         t = utime.ticks_us()
         result = f(*args, **kwargs)
         micros = utime.ticks_diff(utime.ticks_us(), t)
-        print(f'{func_name} execution time: {micros} us')
+        print(f'{__name__} {func_name} execution time: {micros} us')
         return result
     return new_func
-
 
 STATE_IDLE = const(0)
 STATE_MAGICBYTES_PARTIAL = const(1)
