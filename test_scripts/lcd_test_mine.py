@@ -15,7 +15,6 @@ print(f"LCD is used with a charsize of {lcd.charsize}")
 print(f"Cursor position is {lcd.cursor_position}")
 
 lcd.begin()
-lcd.clear()
 utime.sleep(.5)
 
 st = utime.ticks_us()
@@ -24,6 +23,28 @@ en = utime.ticks_us()
 print(f"LCD time: {en-st} us")
 
 st = utime.ticks_us()
+lcd.print("Hello World 1234567890123456789012345678901234567890")
+en = utime.ticks_us()
+print(f"Long LCD time: {en-st} us")
+
+st = utime.ticks_us()
+lcd.print("A")
+en = utime.ticks_us()
+print(f"Short LCD time: {en-st} us")
+
+st = utime.ticks_us()
+lcd.clear()
+lcd.print("Hello World")
+en = utime.ticks_us()
+print(f"LCD clear and print time: {en-st} us")
+
+st = utime.ticks_us()
 print("Hello World")
 en = utime.ticks_us()
 print(f"stdout time: {en-st} us")
+
+st = utime.ticks_us()
+lcd.set_cursor(10, 0)
+lcd.print(str(12))
+en = utime.ticks_us()
+print(f"LCD set nubmer time: {en-st} us")

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 # -----------------------------------------------
 
 import data_buffer
+import fake_lcd
 import timeit
 
 STATE_IDLE = const(0)
@@ -70,9 +71,11 @@ class GBPacket():
 
 
 class GBLink:
-    def __init__(self, buffer=None):
+    def __init__(self, buffer=None, lcd=None):
 
         self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
+
+        self.lcd = lcd if lcd else fake_lcd.FakeLCD()
 
         self.pio_mach = rp2.StateMachine(
             0, gb_link_pio, 
@@ -82,14 +85,16 @@ class GBLink:
             sideset_base=Pin(25),
             freq = int(1e6)
         )
+
         self.packet_state = STATE_IDLE
         self.remaining_bytes = 0
         self.packet = GBPacket()
+        self.byte_received = False
         self.complete_packet = False
-        self.pages_received = 0
         self.rx_byte = 0
         self.tx_byte = 0
         self.printer_status = 0
+        self.end_of_print = True
 
         # timing info
         self.packet_wait_start = 0
@@ -99,22 +104,52 @@ class GBLink:
 
     def startup(self):
         self.pio_mach.irq(self.gb_interrupt)
-        self.pio_mach.active(1)
-        self.pio_mach.put(0x00)
+        self.restart_pio_mach()
         print('gb link ready!')
         # self.run()
         # self.pio_mach.active(0)
+
+    def restart_pio_mach(self):
+        self.pio_mach.active(0)
+        print('Restarting PIO')
+        self.pio_mach.restart()
+        while self.pio_mach.rx_fifo():
+            print('Draining RX FIFO')
+            _ = self.pio_mach.get()
+        while self.pio_mach.tx_fifo():
+            print('Draining TX FIFO')
+            self.pio_mach.exec('pull(noblock)')
+            self.pio_mach.exec('out(null, 32)')
+        self.lcd.clear()
+        self.lcd.print("Ready")
+        self.pio_mach.active(1)
     
     def run(self):
         while True:
             self.packet_wait_start = utime.ticks_us()
-            while not self.complete_packet:
-                pass
-            self.handle_packet()                
-            self.complete_packet = False
+            self.last_packet_time = utime.ticks_ms()
+            while True:
+                if self.complete_packet:
+                    self.handle_packet()
+                    self.complete_packet = False
+                    self.last_packet_time = utime.ticks_ms()
+                this_time = utime.ticks_ms()
+                if utime.ticks_diff(this_time, self.last_packet_time) > 3000:
+                    print(f'Printer timeout at {this_time}')
+                    self.packet_state = STATE_IDLE
+                    self.printer_status = 0
+                    self.data_buffer.clear_packets()
+                    self.restart_pio_mach()
+                    self.last_packet_time = utime.ticks_ms()
+
     
     def gb_interrupt(self, pio_mach):
-        self.rx_byte = pio_mach.get() # & 0xFF
+
+        if self.pio_mach.rx_fifo():
+            self.rx_byte = self.pio_mach.get() # & 0xFF
+        else:
+            print('no RX FIFO byte?')
+            self.rx_ryte = 0
         # print(f'IRQ Received byte {self.rx_byte:02x}')
         # print(f'Had sent {self.tx_byte:02x}')
 
@@ -126,6 +161,7 @@ class GBLink:
                 self.packet_start = utime.ticks_us()
             else:
                 print('First magic byte bad!')
+                self.tx_byte = 0x40
 
         elif self.packet_state == STATE_MAGICBYTES_PARTIAL:
             if self.rx_byte == 0x33:
@@ -133,6 +169,7 @@ class GBLink:
                 self.remaining_bytes = 4
             else:
                 print('Second magic byte bad!')
+                self.tx_byte = 0x40
                 self.packet_state = STATE_IDLE
 
         elif self.packet_state == STATE_HEADER:
@@ -183,7 +220,7 @@ class GBLink:
 
             self.packet_end = utime.ticks_us()                
 
-        pio_mach.put(self.tx_byte)
+        self.pio_mach.put(self.tx_byte)
     
     def handle_packet(self):
         # packet_time = (self.packet_end-self.packet_start)
@@ -198,22 +235,28 @@ class GBLink:
 
         if self.packet.command == COMMAND_INIT:
             self.printer_status = 0x00
-            self.pages_received = 0
         elif self.packet.command == COMMAND_DATA:
             if self.packet.data_length == 0:
                 print('Received stop data packet')
             else:
-                # copy data to elsewhere
-                print('Received print data')
+                if self.data_buffer.num_packets == 0:
+                    self.lcd.clear()
+                    self.lcd.print("Receiving")
                 self.data_buffer.dma_copy_new_packet(self.packet.data)
-                self.pages_received += 1
                 self.printer_status = 0x08
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = 0x06
-            self.fake_print_ticks = 10
+            if (self.packet.data[1] % 16) == 0:
+                print('This is not the end of a print!')
+                self.end_of_print = False
+            else:
+                print('Will be end of print!')
+                self.end_of_print = True
+            self.fake_print_ticks = 5
+            # self.lcd.clear()
+            # self.lcd.print("Printing")
         elif self.packet.command == COMMAND_BREAK:
             self.printer_status = 0x00
-            self.pages_received = 0
         elif self.packet.command == COMMAND_STATUS:
             if self.printer_status == 0x06:
                 self.fake_print_ticks -= 1
@@ -221,6 +264,10 @@ class GBLink:
                     self.printer_status = 0x04
             elif self.printer_status == 0x04:
                 self.printer_status = 0x00
+                if self.end_of_print:
+                    self.lcd.clear()
+                    self.lcd.print(f"Done")
+                    self.data_buffer.clear_packets()
 
 
 if __name__ == "__main__":

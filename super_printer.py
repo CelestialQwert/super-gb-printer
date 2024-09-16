@@ -6,21 +6,8 @@ import utime
 
 import data_buffer
 import gb_link
+import fake_lcd
 import timeit
-
-class FakeLCD():
-    """Fake LCD class for when the screen isn't available."""
-    def __init__(self):
-        pass
-
-    def begin(self):
-        pass
-
-    def clear(self):
-        pass
-
-    def print(self, text: str):
-        print(f"To LCD: {text}")
 
 class SuperPrinter():
 
@@ -31,14 +18,14 @@ class SuperPrinter():
             self.lcd.begin()
         except OSError:
             print('Did not find LCD screen!')
-            self.lcd = FakeLCD()
+            self.lcd = fake_lcd.FakeLCD()
         self.lcd.clear()
 
         self.data_buffer = data_buffer.DataBuffer()
-        self.gb_link = gb_link.GBLink(self.data_buffer)
+        self.gb_link = gb_link.GBLink(self.data_buffer, self.lcd)
     
     def startup(self):
-        self.lcd.print('Hello!')
+        self.lcd.print('Super GB Printer')
         self.gb_link.startup()
         self.gb_link.run()
 
