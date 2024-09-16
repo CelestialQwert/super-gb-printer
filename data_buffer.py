@@ -3,6 +3,8 @@ from collections import namedtuple
 from micropython import const
 from ulab import numpy as np
 
+import fake_lcd
+
 NUM_SCREENS = const(5)
 
 PACKETS_PER_SCREEN = const(9)
@@ -32,7 +34,10 @@ ToneImageBuffer = namedtuple(
 )
 
 class DataBuffer():
-    def __init__(self):
+    def __init__(self, lcd=None):
+
+        self.lcd = lcd if lcd else fake_lcd.FakeLCD()
+
         self.gb_buffer = np.zeros(GB_DATA_BUFFER_DIMS, dtype=np.uint8)
         self.clear_packets()
         self.pos_buffer = [
@@ -66,7 +71,10 @@ class DataBuffer():
         )
     
     def convert_all_packets(self):
+        self.lcd.clear()
+        self.lcd.print('Converting')
         for packet_idx in range(self.num_packets):
+            print(f"Converting packet {packet_idx:02}/{self.num_packets:02}")
             self.convert_one_packet(packet_idx)
     
     def convert_one_packet(self, packet_idx):

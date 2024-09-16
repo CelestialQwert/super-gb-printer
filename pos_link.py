@@ -2,6 +2,8 @@ from machine import UART, Pin
 from ulab import numpy as np
 import utime
 
+import data_buffer
+import fake_lcd
 import timeit
 
 def wait():
@@ -31,7 +33,10 @@ make_lut()
 
 class POSLink:
 
-    def __init__(self, tx_pin=0, rx_pin=0):
+    def __init__(self, buffer=None, lcd=None, tx_pin=0, rx_pin=1):
+
+        self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
+        self.lcd = lcd if lcd else fake_lcd.FakeLCD()
         self.uart = UART(0, baudrate=115200, tx=Pin(tx_pin), rx=Pin(rx_pin))
 
     def init_printer(self): 
@@ -79,6 +84,11 @@ class POSLink:
 
         self.uart.write(payload)
         wait()
+    
+    def send_data_buffer_to_download(self, zoom=3):
+        slice_h = self.data_buffer.num_packets * 16
+        buffer_slice = [x[:slice_h,:] for x in self.data_buffer.pos_buffer]
+        self.send_download_graphics_data(buffer_slice, zoom)
     
     @timeit.timeit
     def send_download_graphics_data(

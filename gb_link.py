@@ -94,7 +94,8 @@ class GBLink:
         self.rx_byte = 0
         self.tx_byte = 0
         self.printer_status = 0
-        self.end_of_print = True
+        self.end_of_print_data = False
+        self.last_packet_time = utime.ticks_ms()
 
         # timing info
         self.packet_wait_start = 0
@@ -104,15 +105,12 @@ class GBLink:
 
     def startup(self):
         self.pio_mach.irq(self.gb_interrupt)
-        self.restart_pio_mach()
+        self.startup_pio_mach()
         print('gb link ready!')
-        # self.run()
-        # self.pio_mach.active(0)
-
-    def restart_pio_mach(self):
+    
+    def shutdown_pio_mach(self):
+        print('Shutting down PIO')
         self.pio_mach.active(0)
-        print('Restarting PIO')
-        self.pio_mach.restart()
         while self.pio_mach.rx_fifo():
             print('Draining RX FIFO')
             _ = self.pio_mach.get()
@@ -120,29 +118,35 @@ class GBLink:
             print('Draining TX FIFO')
             self.pio_mach.exec('pull(noblock)')
             self.pio_mach.exec('out(null, 32)')
-        self.lcd.clear()
-        self.lcd.print("Ready")
+
+    def startup_pio_mach(self):
+        print('Starting PIO')
+        self.pio_mach.restart()
         self.pio_mach.active(1)
     
-    def run(self):
-        while True:
-            self.packet_wait_start = utime.ticks_us()
+    def check_timeout(self):   
+        this_time = utime.ticks_ms()
+        if utime.ticks_diff(this_time, self.last_packet_time) > 3000:
+            print(f'Printer timeout at {this_time}')
+            self.shutdown_pio_mach()
+            self.packet_state = STATE_IDLE
+            self.printer_status = 0
+            self.data_buffer.clear_packets()
+            self.lcd.clear()
+            self.lcd.print("Ready")
+            self.startup_pio_mach()
             self.last_packet_time = utime.ticks_ms()
-            while True:
-                if self.complete_packet:
-                    self.handle_packet()
-                    self.complete_packet = False
-                    self.last_packet_time = utime.ticks_ms()
-                this_time = utime.ticks_ms()
-                if utime.ticks_diff(this_time, self.last_packet_time) > 3000:
-                    print(f'Printer timeout at {this_time}')
-                    self.packet_state = STATE_IDLE
-                    self.printer_status = 0
-                    self.data_buffer.clear_packets()
-                    self.restart_pio_mach()
-                    self.last_packet_time = utime.ticks_ms()
-
     
+    def check_print_ready(self):
+        this_time = utime.ticks_ms()
+        if (
+            utime.ticks_diff(this_time, self.last_packet_time) > 1000
+            and self.end_of_print_data
+        ):
+            self.end_of_print_data = False
+            return True
+        return False
+
     def gb_interrupt(self, pio_mach):
 
         if self.pio_mach.rx_fifo():
@@ -222,7 +226,10 @@ class GBLink:
 
         self.pio_mach.put(self.tx_byte)
     
-    def handle_packet(self):
+    def check_handle_packet(self):
+        if not self.complete_packet:
+            return
+        
         # packet_time = (self.packet_end-self.packet_start)
         # packet_spacing = (self.packet_start-self.packet_wait_start)
         print(
@@ -248,10 +255,10 @@ class GBLink:
             self.printer_status = 0x06
             if (self.packet.data[1] % 16) == 0:
                 print('This is not the end of a print!')
-                self.end_of_print = False
+                self.end_of_print_data = False
             else:
                 print('Will be end of print!')
-                self.end_of_print = True
+                self.end_of_print_data = True
             self.fake_print_ticks = 5
             # self.lcd.clear()
             # self.lcd.print("Printing")
@@ -264,11 +271,9 @@ class GBLink:
                     self.printer_status = 0x04
             elif self.printer_status == 0x04:
                 self.printer_status = 0x00
-                if self.end_of_print:
-                    self.lcd.clear()
-                    self.lcd.print(f"Done")
-                    self.data_buffer.clear_packets()
-
+                    
+        self.complete_packet = False
+        self.last_packet_time = utime.ticks_ms()
 
 if __name__ == "__main__":
     gb_link = GBLink()
