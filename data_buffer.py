@@ -5,18 +5,19 @@ from ulab import numpy as np
 
 import fake_lcd
 
-NUM_SCREENS = const(5)
+NUM_GB_BUFFER_SCREENS = const(16)
+NUM_POS_BUFFER_SCREENS = const(2)
 
 PACKETS_PER_SCREEN = const(9)
 PACKET_SIZE = const(640) # 0x280
-NUM_PACKETS = NUM_SCREENS * PACKETS_PER_SCREEN
+NUM_PACKETS = NUM_GB_BUFFER_SCREENS * PACKETS_PER_SCREEN
 GB_DATA_BUFFER_DIMS = (NUM_PACKETS, PACKET_SIZE)
 
 SCREEN_WIDTH = const(160)
 SCREEN_HEIGHT = const(144)
 POS_PIXELS_PER_BYTE = const(8)
 POS_BUFFER_DIMS = (
-    SCREEN_HEIGHT * NUM_SCREENS, 
+    SCREEN_HEIGHT * NUM_POS_BUFFER_SCREENS, 
     SCREEN_WIDTH // POS_PIXELS_PER_BYTE
 )
 
@@ -39,7 +40,9 @@ class DataBuffer():
         self.lcd = lcd if lcd else fake_lcd.FakeLCD()
 
         self.gb_buffer = np.zeros(GB_DATA_BUFFER_DIMS, dtype=np.uint8)
-        self.clear_packets()
+        self.num_converted_packets = 0
+        self.num_packets = 0
+        self.gb_compression_flag = [False] * NUM_PACKETS
         self.pos_buffer = [
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
@@ -71,13 +74,23 @@ class DataBuffer():
         )
     
     def convert_all_packets(self):
+        num_packs = min(18, self.num_packets)
+        self.convert_packet_range(0, num_packs)
+        
+    def convert_packet_range(self, start, end):
         self.lcd.clear()
-        self.lcd.print('Converting')
-        for packet_idx in range(self.num_packets):
-            print(f"Converting packet {packet_idx:02}/{self.num_packets:02}")
-            self.convert_one_packet(packet_idx)
+        self.lcd.print("Converting")
+        for pos_idx, gb_idx in enumerate(range(start, end)):
+            print(f"Converting packet {gb_idx}")
+            self.lcd.set_cursor(11, 0)
+            self.lcd.print(f"{gb_idx}")
+            self.convert_one_packet(gb_idx, pos_idx)
+        self.num_converted_packets = end - start
     
-    def convert_one_packet(self, packet_idx):
+    def convert_one_packet(self, gb_idx, pos_idx=-1):
+        if pos_idx == -1:
+            pos_idx = gb_idx
+
         for big_row in range(BIG_ROWS_PER_PACKET):
             for tile_idx in range(TILES_PER_BIG_ROW):
                 tile_offset = (
@@ -87,10 +100,10 @@ class DataBuffer():
 
                 # each row is two bytes, little endian
                 lbytes = self.gb_buffer[
-                    packet_idx, tile_offset : tile_offset+BYTES_PER_TILE : 2
+                    gb_idx, tile_offset : tile_offset+BYTES_PER_TILE : 2
                 ]
                 hbytes = self.gb_buffer[
-                    packet_idx, tile_offset+1:tile_offset+BYTES_PER_TILE+1:2
+                    gb_idx, tile_offset+1:tile_offset+BYTES_PER_TILE+1:2
                 ]
 
                 # white doesn't need to be tracked since it's not printed
@@ -104,7 +117,7 @@ class DataBuffer():
                 tone51_tile = black_tile | lightgray_tile 
                 tone52_tile = black_tile | darkgray_tile | lightgray_tile 
 
-                trow = (packet_idx * 2 + big_row) * ROWS_PER_TILE
+                trow = (pos_idx * 2 + big_row) * ROWS_PER_TILE
 
                 self.pos_buffer[0][trow:trow+8, tile_idx] = tone49_tile
                 self.pos_buffer[1][trow:trow+8, tile_idx] = tone50_tile

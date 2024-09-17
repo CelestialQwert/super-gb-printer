@@ -21,13 +21,13 @@ class SuperPrinter():
             print('Did not find LCD screen!')
             self.lcd = fake_lcd.FakeLCD()
         self.lcd.clear()
+        self.lcd.print('Super GB Printer')
 
         self.data_buffer = data_buffer.DataBuffer(self.lcd)
         self.gb_link = gb_link.GBLink(self.data_buffer, self.lcd)
         self.pos_link = pos_link.POSLink(self.data_buffer, self.lcd)
     
     def startup(self):
-        self.lcd.print('Super GB Printer')
         self.gb_link.startup()
         self.pos_link.set_justification(1)
         self.main_loop()
@@ -44,13 +44,22 @@ class SuperPrinter():
                     self.gb_link.check_timeout()
         except KeyboardInterrupt as e:
             self.gb_link.shutdown_pio_mach()
+            self.lcd.clear()
             raise e
     
     def print(self):
         self.gb_link.shutdown_pio_mach()
-        self.data_buffer.convert_all_packets()
-        self.pos_link.send_data_buffer_to_download()
-        self.pos_link.print_download_graphics_data()
+        num_pages = ((self.data_buffer.num_packets - 1) // 18) + 1
+        for p in range(num_pages):
+            print(f'Sending page {p+1} of {num_pages}')
+            p_low = p*18
+            p_hi = min((p+1)*18, self.data_buffer.num_packets)
+            self.data_buffer.convert_packet_range(p_low, p_hi)
+            self.pos_link.send_data_buffer_to_download()
+            utime.sleep(1)
+            self.pos_link.print_download_graphics_data()
+            utime.sleep(1)
+        utime.sleep(.5)
         self.pos_link.cut()
         self.lcd.clear()
         self.lcd.print(f"Done")

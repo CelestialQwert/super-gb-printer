@@ -7,7 +7,7 @@ import fake_lcd
 import timeit
 
 def wait():
-    utime.sleep(.001)
+    utime.sleep(.005)
 
 def stretch_with_zero(n, stretch):
     if not n:
@@ -22,14 +22,15 @@ zoomed_lut = {
 }
 @timeit.timeit
 def make_lut():
-    global zoomed_lut
+    global zoomed_lut, made_lut
     for i in range(256):
         for zoom, single_lut in zoomed_lut.items():
             single_lut[i] = np.frombuffer(
                 (stretch_with_zero(i, zoom) * (2**zoom - 1)).to_bytes(zoom, 'big'),
                 dtype=np.uint8
             )
-make_lut()
+    made_lut = True
+made_lut = False
 
 class POSLink:
 
@@ -38,6 +39,8 @@ class POSLink:
         self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
         self.lcd = lcd if lcd else fake_lcd.FakeLCD()
         self.uart = UART(0, baudrate=115200, tx=Pin(tx_pin), rx=Pin(rx_pin))
+        if not made_lut:
+            make_lut()
 
     def init_printer(self): 
         #                      ESC  @
@@ -85,8 +88,9 @@ class POSLink:
         self.uart.write(payload)
         wait()
     
+    @timeit.timeit
     def send_data_buffer_to_download(self, zoom=3):
-        slice_h = self.data_buffer.num_packets * 16
+        slice_h = self.data_buffer.num_converted_packets * 16
         buffer_slice = [x[:slice_h,:] for x in self.data_buffer.pos_buffer]
         self.send_download_graphics_data(buffer_slice, zoom)
     
@@ -110,12 +114,19 @@ class POSLink:
         tile_row_buffer.copy()
 
         print('Sending dl data...')
+        self.lcd.clear()
+        self.lcd.print('Sending')
         for i, tone_payload in enumerate(full_payload):
             print(f"sending tone {i}")
             self.send_tone_number(i)
             for row in range(y):
                 if not row % 16:
-                    print(f"Row {row}")
+                    n = (row + i * y) // 16
+                    d = y // 4
+                    print(f"Packet {n:02}/{d:02}")
+                    self.lcd.set_cursor(8, 0)
+                    self.lcd.print(f"{n:02}/{d:02}")
+
                 if zoom_x > 1:
                     for px in range(x):
                         tile_row_buffer[px*zoom_x:(px+1)*zoom_x] = (
