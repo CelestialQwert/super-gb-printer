@@ -15,3 +15,6 @@ class FakeLCD():
 
     def set_cursor(self, *args, **kwargs):
         pass
+
+    def create_char(self, *args, **kwargs):
+        pass

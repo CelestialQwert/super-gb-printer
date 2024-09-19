@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 import data_buffer
 import fake_lcd
 import timeit
+import pinout as pin
 
 STATE_IDLE = const(0)
 STATE_MAGICBYTES_PARTIAL = const(1)
@@ -35,29 +36,27 @@ COMMAND_STATUS = const(0xF)
 @rp2.asm_pio(
     in_shiftdir=rp2.PIO.SHIFT_LEFT,
     out_shiftdir=rp2.PIO.SHIFT_LEFT,
-    set_init=rp2.PIO.OUT_HIGH,
+    set_init=rp2.PIO.OUT_LOW,
     out_init=rp2.PIO.OUT_LOW,
-    sideset_init=rp2.PIO.OUT_LOW
 )
-def gb_link_pio(): 
-    wrap_target() 
+def gb_link_pio():
     set(x, 6)             # set loop to run 6 + 1 times
-    wait(0, gpio, 5)      # wait for falling edge
-    set(pins, 0)          # turn off LED
+    wait(0, gpio, 2)      # wait for falling edge
+    set(pins, 1)          # byte started, turn on LED
     pull(noblock)         # pull value from TX FIFO to OSR
-    out(null, 24)         # shift left by 24
+    out(null, 24)         # shift left by 24, keeping 8 bits of desired data
     out(pins, 1)          # out the MSB bit in OSR to GB
-    wait(1, gpio, 5)[2]   # wait for rising edge
-    label("bitloop")      
-    in_(pins, 1)          # input bit from GB to ISR
-    wait(0, gpio, 5)[2]   # wait for falling edge
-    out(pins, 1)          # output bit from OSR to GB
-    wait(1, gpio, 5)[1]   # wait for rising edge
-    jmp(x_dec, "bitloop") # loop through the rest of the bits
+    wait(1, gpio, 2)[2]   # wait for rising edge
+    label("loop")      
+    in_(pins, 1)          # MSB input bit from GB to ISR
+    wait(0, gpio, 2)[2]   # wait for falling edge
+    out(pins, 1)          # output the next bit from OSR to GB
+    wait(1, gpio, 2)[1]   # wait for rising edge
+    jmp(x_dec, "loop")    # loop through the rest of the bits
     in_(pins, 1)          # input last bit from GB
     push(noblock)         # push the received value from ISR to RX FIFO
     irq(rel(0))           # set interrupt
-    wrap()
+    set(pins, 0)          # byte complete, turn off LED
 
 
 class GBPacket():
@@ -76,13 +75,12 @@ class GBLink:
         self.lcd = lcd if lcd else fake_lcd.FakeLCD()
         self.pio_mach = rp2.StateMachine(
             0, gb_link_pio, 
-            in_base=Pin(2),
-            out_base=Pin(3),
-            set_base=Pin(25),
-            sideset_base=Pin(25),
+            in_base=Pin(pin.GB_IN),
+            out_base=Pin(pin.GB_OUT),
+            set_base=Pin(pin.GB_LED_ACTIVITY),
             freq = int(1e6)
         )
-
+        self.pio_enabled_led = Pin(pin.GB_PIO_ENABLED, Pin.OUT)
         self.packet_state = STATE_IDLE
         self.remaining_bytes = 0
         self.packet = GBPacket()
@@ -104,6 +102,7 @@ class GBLink:
     def shutdown_pio_mach(self):
         print('Shutting down PIO')
         self.pio_mach.active(0)
+        self.pio_enabled_led.off()
         while self.pio_mach.rx_fifo():
             print('Draining RX FIFO')
             _ = self.pio_mach.get()
@@ -115,6 +114,7 @@ class GBLink:
     def startup_pio_mach(self):
         print('Starting PIO')
         self.pio_mach.restart()
+        self.pio_enabled_led.on()
         self.pio_mach.active(1)
         self.pio_mach.put(0)
     
@@ -146,7 +146,7 @@ class GBLink:
         if self.pio_mach.rx_fifo():
             self.rx_byte = self.pio_mach.get() # & 0xFF
         else:
-            print('no RX FIFO byte?')
+            print('no RX FIFO byte!')
             self.rx_ryte = 0
         # print(f'IRQ Received byte {self.rx_byte:02x}')
         # print(f'Had sent {self.tx_byte:02x}')
@@ -238,11 +238,14 @@ class GBLink:
             if self.packet.data_length == 0:
                 print('Received stop data packet')
             else:
-                if self.data_buffer.num_packets == 0:
-                    self.lcd.clear()
-                    self.lcd.print("Receiving")
                 self.data_buffer.dma_copy_new_packet(self.packet.data)
                 self.printer_status = 0x08
+                if self.data_buffer.num_packets == 1:
+                    self.lcd.clear()
+                    self.lcd.print("Packet 1")
+                else:
+                    self.lcd.set_cursor(7, 0)
+                    self.lcd.print(str(self.data_buffer.num_packets))
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = 0x06
             if (self.packet.data[1] % 16) == 0:

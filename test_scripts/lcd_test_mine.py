@@ -5,7 +5,7 @@ import utime
 # define custom I2C interface, default is 'I2C(0)'
 # check the docs of your device for further details and pin infos
 # this are the pins for the Raspberry Pi Pico adapter board
-i2c = I2C(0, scl=Pin(21), sda=Pin(20), freq=300000)
+i2c = I2C(1, scl=Pin(27), sda=Pin(26), freq=350000)
 lcd = LCD(addr=0x27, cols=16, rows=2, i2c=i2c)
 
 # get LCD infos/properties

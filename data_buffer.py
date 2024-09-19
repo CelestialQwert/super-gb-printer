@@ -1,5 +1,4 @@
 import rp2
-from collections import namedtuple
 from micropython import const
 from ulab import numpy as np
 
@@ -28,12 +27,6 @@ ROWS_PER_TILE = const(8)
 BYTES_PER_TILE = ROWS_PER_TILE * BYTES_PER_ROW
 BYTES_PER_BIG_ROW = TILES_PER_BIG_ROW * BYTES_PER_TILE
 
-
-ToneImageBuffer = namedtuple(
-    'ToneImageBuffer',
-    ['tone49', 'tone50', 'tone51', 'tone52']
-)
-
 class DataBuffer():
     def __init__(self, lcd=None):
 
@@ -42,6 +35,7 @@ class DataBuffer():
         self.gb_buffer = np.zeros(GB_DATA_BUFFER_DIMS, dtype=np.uint8)
         self.num_converted_packets = 0
         self.num_packets = 0
+        self.current_page = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.pos_buffer = [
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
@@ -55,6 +49,7 @@ class DataBuffer():
     
     def clear_packets(self):
         self.num_packets = 0
+        self.current_page = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
     
     def dma_copy_new_packet(self, packet):
@@ -76,12 +71,20 @@ class DataBuffer():
     def convert_all_packets(self):
         num_packs = min(18, self.num_packets)
         self.convert_packet_range(0, num_packs)
+    
+    def convert_page_of_packets(self, page):
+        self.current_page = page + 1
+        p_low = page*18
+        p_hi = min((page+1)*18, self.num_packets)
+        self.convert_packet_range(p_low, p_hi)
         
     def convert_packet_range(self, start, end):
         self.lcd.clear()
         self.lcd.print("Converting")
+        if self.num_pages > 1:
+            self.lcd.set_cursor(0, 1)
+            self.lcd.print(f"Page {self.current_page}/{self.num_pages}")
         for pos_idx, gb_idx in enumerate(range(start, end)):
-            print(f"Converting packet {gb_idx}")
             self.lcd.set_cursor(11, 0)
             self.lcd.print(f"{gb_idx}")
             self.convert_one_packet(gb_idx, pos_idx)
@@ -126,5 +129,9 @@ class DataBuffer():
     
     def decrypt_packet(self, packet_idx):
         raise NotImplementedError
+
+    @property
+    def num_pages(self):
+        return ((self.num_packets - 1) // 18) + 1
     
 
