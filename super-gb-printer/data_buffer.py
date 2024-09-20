@@ -2,6 +2,7 @@ import rp2
 from micropython import const
 from ulab import numpy as np
 
+import gb_link
 import fake_lcd
 
 NUM_GB_BUFFER_SCREENS = const(16)
@@ -27,16 +28,27 @@ ROWS_PER_TILE = const(8)
 BYTES_PER_TILE = ROWS_PER_TILE * BYTES_PER_ROW
 BYTES_PER_BIG_ROW = TILES_PER_BIG_ROW * BYTES_PER_TILE
 
+class GBPacket():
+    def __init__(self):
+        self.command = 0
+        self.compression_flag = 0
+        self.data_length = 0
+        self.data = bytearray(PACKET_SIZE)
+        self.checksum = 0
+        self.calc_checksum = 0
+
 class DataBuffer():
     def __init__(self, lcd=None):
 
         self.lcd = lcd if lcd else fake_lcd.FakeLCD()
 
         self.gb_buffer = np.zeros(GB_DATA_BUFFER_DIMS, dtype=np.uint8)
+        self.decomp_buffer = np.zeros(PACKET_SIZE, dtype=np.uint8)
         self.num_converted_packets = 0
         self.num_packets = 0
         self.current_page = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
+        self.data_length = [0] * NUM_PACKETS
         self.pos_buffer = [
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
@@ -51,11 +63,14 @@ class DataBuffer():
         self.num_packets = 0
         self.current_page = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
+        self.data_length = [0] * NUM_PACKETS
     
-    def dma_copy_new_packet(self, packet):
+    def dma_copy_new_packet(self, packet: GBPacket):
         if self.num_packets == GB_DATA_BUFFER_DIMS:
             raise ValueError('GB packet buffer is full!')
-        self.dma_copy_packet(packet, self.num_packets)
+        self.dma_copy_packet(packet.data, self.num_packets)
+        self.gb_compression_flag[self.num_packets] = bool(packet.compression_flag)
+        self.data_length[self.num_packets] = packet.data_length
         self.num_packets += 1
         print(f"Received new packet, I have {self.num_packets}")
     
@@ -91,6 +106,8 @@ class DataBuffer():
         self.num_converted_packets = end - start
     
     def convert_one_packet(self, gb_idx, pos_idx=-1):
+        if self.gb_compression_flag[gb_idx]:
+            self.decompress_packet_in_buffer(gb_idx, self.data_length[gb_idx])
         if pos_idx == -1:
             pos_idx = gb_idx
 
@@ -127,9 +144,29 @@ class DataBuffer():
                 self.pos_buffer[2][trow:trow+8, tile_idx] = tone51_tile
                 self.pos_buffer[3][trow:trow+8, tile_idx] = tone52_tile
     
-    def decrypt_packet(self, packet_idx):
-        raise NotImplementedError
-
+    def decompress_packet_in_buffer(self, packet_idx, data_length):
+        self.decompress_packet(self.gb_buffer[packet_idx,:], data_length)
+        self.gb_buffer[packet_idx,:] = self.decomp_buffer
+    
+    def decompress_packet(self, comp_packet, data_length):
+        comp_idx = 0
+        decomp_idx = 0
+        print(f"decomp_idx")
+        while comp_idx < data_length:
+            comp_byte = comp_packet[comp_idx]
+            if comp_byte & 0x80:
+                run = 2 + comp_byte - 0x80
+                repeat_byte = comp_packet[comp_idx+1]
+                self.decomp_buffer[decomp_idx:decomp_idx+run] = repeat_byte
+                comp_idx += 2
+                decomp_idx += run
+            else:
+                run = 1 + comp_byte
+                self.decomp_buffer[decomp_idx:decomp_idx+run] = \
+                    comp_packet[comp_idx+1:comp_idx+run+1]
+                comp_idx += run + 1
+                decomp_idx += run
+    
     @property
     def num_pages(self):
         return ((self.num_packets - 1) // 18) + 1

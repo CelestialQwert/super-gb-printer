@@ -58,16 +58,6 @@ def gb_link_pio():
     irq(rel(0))           # set interrupt
     set(pins, 0)          # byte complete, turn off LED
 
-
-class GBPacket():
-    def __init__(self):
-        self.command = 0
-        self.compression_flag = 0
-        self.data_length = 0
-        self.data = bytearray(0x280)
-        self.checksum = 0
-        self.calc_checksum = 0
-
 class GBLink:
     def __init__(self, buffer=None, lcd=None):
 
@@ -83,7 +73,7 @@ class GBLink:
         self.pio_enabled_led = Pin(pin.GB_PIO_ENABLED, Pin.OUT)
         self.packet_state = STATE_IDLE
         self.remaining_bytes = 0
-        self.packet = GBPacket()
+        self.packet = data_buffer.GBPacket()
         self.byte_received = False
         self.complete_packet = False
         self.rx_byte = 0
@@ -238,7 +228,10 @@ class GBLink:
             if self.packet.data_length == 0:
                 print('Received stop data packet')
             else:
-                self.data_buffer.dma_copy_new_packet(self.packet.data)
+                self.data_buffer.dma_copy_new_packet(self.packet)
+                pck = self.data_buffer.num_packets
+                cmp = bool(self.packet.compression_flag)
+                self.data_buffer.gb_compression_flag[pck] = cmp
                 self.printer_status = 0x08
                 if self.data_buffer.num_packets == 1:
                     self.lcd.clear()
