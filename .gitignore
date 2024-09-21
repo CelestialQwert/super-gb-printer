@@ -157,3 +157,5 @@ Pico-W-Stub
 venv_picoprint
 .micropico-stubs
 lcd_i2c/
+.micropico
+prototypes/
