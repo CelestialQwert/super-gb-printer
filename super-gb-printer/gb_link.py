@@ -14,7 +14,7 @@ import data_buffer
 import fake_lcd
 import lcd_i2c
 import pinout as pinn
-import timeit
+import utimeit
 
 # Add type hints for the rp2.PIO Instructions
 # IDE thinks the module is imported

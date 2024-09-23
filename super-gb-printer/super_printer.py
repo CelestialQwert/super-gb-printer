@@ -12,7 +12,7 @@ import fake_lcd
 import gb_link
 import pinout as pin
 import pos_link
-import timeit
+import utimeit
 
 from lcd_i2c import LCD
 
