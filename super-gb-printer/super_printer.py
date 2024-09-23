@@ -1,6 +1,9 @@
-"""Super Game Boy Printer"""
+"""Super Game Boy Printer
 
-from lcd_i2c import LCD
+Main script for the Super GB Printer. Will eventually get called main.py
+when this whole thing is done.
+"""
+
 from machine import I2C, Pin
 import utime
 
@@ -11,11 +14,18 @@ import pinout as pin
 import pos_link
 import timeit
 
-class SuperPrinter():
+from lcd_i2c import LCD
 
-    def __init__(self):
+class SuperPrinter():
+    """Top level class for the printer.
+    
+    Contains instances of all the child classes needed to run the printer,
+    and handles tasks that involve most/all of those child classes.
+    """
+
+    def __init__(self) -> None:
         try:
-            i2c = I2C(1, scl=Pin(27), sda=Pin(26), freq=300000)
+            i2c = I2C(1, scl=pin.LCD_SCL, sda=pin.LCD_SDA, freq=300000)
             self.lcd = LCD(addr=0x27, cols=16, rows=2, i2c=i2c)
             self.lcd.begin()
         except OSError:
@@ -30,7 +40,9 @@ class SuperPrinter():
             self.data_buffer, self.lcd, pin.POS_UART, pin.POS_TX, pin.POS_RX
         )
     
-    def startup(self):
+    def run(self) -> None:
+        """The method to run after instantiatng a SuperPrinter."""
+
         try:
             self.gb_link.startup()
             self.pos_link.set_justification(1)
@@ -42,17 +54,36 @@ class SuperPrinter():
             self.lcd.print(e.__class__.__name__)
             raise e
     
+    def main_loop(self) -> None:
+            """The main loop.
 
-    def main_loop(self):
+            Runs continuously, checking if certain things are ready.
+            """
+
             while True:
                 self.last_packet_time = utime.ticks_ms()
                 while True:
-                    # byte handling done via IRQ
+                    # byte handling done via PIO and IRQ method in gb_link
                     self.gb_link.check_handle_packet()
                     if self.gb_link.check_print_ready():
                         self.print()
                     self.gb_link.check_timeout()
-    def print(self):
+
+    def print(self) -> None:
+        """Runs a print job.
+
+        Shuts down the GB link PIO while running so any Game Boy software
+        will immediately throw an error while the print is processing.
+        
+        Does the following tasks:
+        - Converts the incoming GB tile data to the POS printer format
+        - Sends data to the printer, enlarging it as needed
+        - Send print and cut paper commands to the printer
+
+        If there is more than 18 packets of data, it is processed, sent, and
+        printed in "pages" of 18 packets, then cut at the end.
+        """
+
         self.gb_link.shutdown_pio_mach()
         for p in range(self.data_buffer.num_pages):
             print(f'Sending page {p+1} of {self.data_buffer.num_pages}')
@@ -77,7 +108,13 @@ class SuperPrinter():
         [0x01, 0x05, 0x09, 0x01, 0x11, 0x03, 0x1E, 0x00]
     ]
 
-    def print_logo(self):
+    def print_logo(self) -> None:
+        """Prints logo to LCD screen.
+        
+        Intended to run at startup, it sends the above custom character data
+        (a small Game Boy pic) to the LCD and displays it and the title.
+        """
+
         for i, gb_char in enumerate(self.gb_chars):
             self.lcd.create_char(i, gb_char)
         self.lcd.clear()
@@ -86,11 +123,11 @@ class SuperPrinter():
         self.lcd.print(chr(2) + chr(3) + ' GB Printer')
 
 
-
+def main():
+    printer = SuperPrinter()
+    printer.run()
 
 
 if __name__ == "__main__":
-    printer = SuperPrinter()
-    printer.startup()
-
+    main()
   
