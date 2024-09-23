@@ -1,4 +1,5 @@
-from machine import Pin
+"""Pin definitions for all atached devices."""
+
 from micropython import const
 
 #GB_CLK MUST BE SET MANUALLY IN gb_link.py

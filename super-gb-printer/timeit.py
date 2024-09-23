@@ -1,3 +1,5 @@
+"""Contains a helper function for timing."""
+
 import utime
 
 def timeit(f, *args, **kwargs):

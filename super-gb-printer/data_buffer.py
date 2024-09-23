@@ -1,9 +1,8 @@
 """DataBuffer class
 
-A DataBuffer contains buffers to hold incoming GB packets, GB tile data 
-extracted from those packets, and graphics data to be sent to the the POS 
-printer. It also includes methods for manipulating data between different
-formats.
+A DataBuffer contains buffers for GB tile data extracted from incoming 
+GB packets, and graphics data to be sent to the the POS printer. It also 
+includes methods for manipulating data between different buffers.
 """
 
 import rp2
@@ -61,10 +60,9 @@ class GBPacket():
 
 class DataBuffer():
     """
-    A DataBuffer contains buffers to hold incoming GB packets, GB tile data 
-    extracted from those packets, and graphics data to be sent to the the POS 
-    printer. It also includes methods for manipulating data between different
-    formats.
+    A DataBuffer contains buffers for GB tile data extracted from incoming 
+    GB packets, and graphics data to be sent to the the POS printer. It also 
+    includes methods for manipulating data between different buffers.
     """
 
     AnyLCD = typing.Union[lcd_i2c.LCD, fake_lcd.FakeLCD, None]
@@ -73,7 +71,7 @@ class DataBuffer():
         """Instantiate the class.
         
         Args:
-            lcd: LCD object for an optional attached LCD screen
+            lcd: LCD instance for an optional attached LCD screen
         """
 
         self.lcd = lcd if lcd else fake_lcd.FakeLCD()

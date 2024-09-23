@@ -1,6 +1,9 @@
 
 class FakeLCD():
-    """Fake LCD class for when the screen isn't available."""
+    """Fake LCD class for when the screen isn't available.
+    
+    Most methods do nothing, but the print method redirects to stdout.
+    """
     def __init__(self):
         pass
 

@@ -1,22 +1,30 @@
+"""GBLink Class
+
+Contains methods that handle the connection to the Game Boy.
+"""
+
 import rp2
 import utime
-
 from machine import Pin
 from micropython import const
+from typing import Optional, Union
 from ulab import numpy as np
-
-# -----------------------------------------------
-# add type hints for the rp2.PIO Instructions
-from typing_extensions import TYPE_CHECKING # type: ignore
-if TYPE_CHECKING:
-    from rp2.asm_pio import *
-# -----------------------------------------------
 
 import data_buffer
 import fake_lcd
+import lcd_i2c
+import pinout as pinn
 import timeit
-import pinout as pin
 
+# Add type hints for the rp2.PIO Instructions
+# IDE thinks the module is imported
+# Actual code will have TYPE_CHECKING = False to prevent the import
+from typing_extensions import TYPE_CHECKING # type: ignore
+if TYPE_CHECKING:
+    from rp2.asm_pio import *
+
+
+# states for handling the incoming GB packet
 STATE_IDLE = const(0)
 STATE_MAGICBYTES_PARTIAL = const(1)
 STATE_HEADER = const(2)
@@ -26,13 +34,14 @@ STATE_RESPONSE_READY = const(5)
 STATE_RESPONSE_PARTIAL = const(6)
 STATE_TIMEOUT = const(7)
 
+# commands in the GB packets
 COMMAND_INIT = const(1)
 COMMAND_PRINT = const(2)
 COMMAND_DATA = const(4)
 COMMAND_BREAK = const(8)
 COMMAND_STATUS = const(0xF)
 
-
+# PIO program for interacing with Game Boy
 @rp2.asm_pio(
     in_shiftdir=rp2.PIO.SHIFT_LEFT,
     out_shiftdir=rp2.PIO.SHIFT_LEFT,
@@ -59,18 +68,32 @@ def gb_link_pio():
     set(pins, 0)          # byte complete, turn off LED
 
 class GBLink:
-    def __init__(self, buffer=None, lcd=None):
+    """Contains methods that handle the connection to the Game Boy."""
+
+    AnyLCD = Union[lcd_i2c.LCD, fake_lcd.FakeLCD, None]
+
+    def __init__(
+            self, 
+            buffer: Optional[data_buffer.DataBuffer] = None,
+            lcd: AnyLCD = None
+        ):
+        """Instantiate the class.
+        
+        Args:
+            buffer: DataBuffer instance
+            lcd: LCD instance for an optional attached LCD screen
+        """
 
         self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
         self.lcd = lcd if lcd else fake_lcd.FakeLCD()
         self.pio_mach = rp2.StateMachine(
             0, gb_link_pio, 
-            in_base=Pin(pin.GB_IN),
-            out_base=Pin(pin.GB_OUT),
-            set_base=Pin(pin.GB_LED_ACTIVITY),
+            in_base=Pin(pinn.GB_IN),
+            out_base=Pin(pinn.GB_OUT),
+            set_base=Pin(pinn.GB_LED_ACTIVITY),
             freq = int(1e6)
         )
-        self.pio_enabled_led = Pin(pin.GB_PIO_ENABLED, Pin.OUT)
+        self.pio_enabled_led = Pin(pinn.GB_PIO_ENABLED, Pin.OUT)
         self.packet_state = STATE_IDLE
         self.remaining_bytes = 0
         self.packet = data_buffer.GBPacket()
@@ -83,13 +106,17 @@ class GBLink:
         self.last_packet_time = utime.ticks_ms()
         self.fake_print_ticks = 0
 
-    def startup(self):
+    def startup(self) -> None:
+        """Initialize the GB link."""
+
         self.pio_mach.irq(self.gb_interrupt)
         self.shutdown_pio_mach()
         self.startup_pio_mach()
         print('gb link ready!')
     
-    def shutdown_pio_mach(self):
+    def shutdown_pio_mach(self) -> None:
+        """Shut down link PIO and clean out FIFOs."""
+
         print('Shutting down PIO')
         self.pio_mach.active(0)
         self.pio_enabled_led.off()
@@ -101,14 +128,21 @@ class GBLink:
             self.pio_mach.exec('pull(noblock)')
             self.pio_mach.exec('out(null, 32)')
 
-    def startup_pio_mach(self):
+    def startup_pio_mach(self) -> None:
+        """Start up link PIO and add initial status byte 0."""
+        
         print('Starting PIO')
         self.pio_mach.restart()
         self.pio_enabled_led.on()
         self.pio_mach.active(1)
         self.pio_mach.put(0)
     
-    def check_timeout(self):   
+    def check_timeout(self) -> None:
+        """Check if the GB link has timed out.
+        
+        Timeout is 3 seconds, after which the PIO is restarted, the current
+        packet and data buffer is discarded, and some other things are reset.
+        """
         this_time = utime.ticks_ms()
         if utime.ticks_diff(this_time, self.last_packet_time) > 3000:
             print(f'Printer timeout at {this_time}')
@@ -121,7 +155,17 @@ class GBLink:
             self.startup_pio_mach()
             self.last_packet_time = utime.ticks_ms()
     
-    def check_print_ready(self):
+    def check_print_ready(self) -> bool:
+        """Checks if a print is ready to start.
+
+        Check succeeds if a print command packet has been received from the
+        Game Boy and at least one second has passed since the last incoming
+        packet, to ensure the Game Boy is no longer sending status commands
+        during the fake print period (see check_handle_packet). 
+
+        Returns:
+            True or False if print is (not) ready.
+        """
         this_time = utime.ticks_ms()
         if (
             utime.ticks_diff(this_time, self.last_packet_time) > 1000
@@ -131,16 +175,16 @@ class GBLink:
             return True
         return False
 
-    def gb_interrupt(self, pio_mach):
+    def gb_interrupt(self, pio_mach: rp2.StateMachine) -> None:
+        """IRQ handler for incoming byte on the GB link PIO."""
 
-        if self.pio_mach.rx_fifo():
-            self.rx_byte = self.pio_mach.get() # & 0xFF
+        if pio_mach.rx_fifo():
+            self.rx_byte = pio_mach.get()
         else:
             print('no RX FIFO byte!')
             self.rx_ryte = 0
-        # print(f'IRQ Received byte {self.rx_byte:02x}')
-        # print(f'Had sent {self.tx_byte:02x}')
 
+        # by default, send 0 byte back
         self.tx_byte = 0x00
 
         if self.packet_state == STATE_IDLE:
@@ -149,7 +193,6 @@ class GBLink:
                 self.packet_start = utime.ticks_us()
             else:
                 print('First magic byte bad!')
-                self.tx_byte = 0x40
 
         elif self.packet_state == STATE_MAGICBYTES_PARTIAL:
             if self.rx_byte == 0x33:
@@ -164,16 +207,12 @@ class GBLink:
             self.remaining_bytes -= 1
             if self.remaining_bytes == 3:
                 self.packet.command = self.rx_byte
-                # self.packet.calc_checksum += self.rx_byte
             elif self.remaining_bytes == 2:
                 self.packet.compression_flag = self.rx_byte
-                # self.packet.calc_checksum += self.rx_byte
             elif self.remaining_bytes == 1:
                 self.packet.data_length = self.rx_byte
-                # self.packet.calc_checksum += self.rx_byte
             else:
                 self.packet.data_length += self.rx_byte * 256
-                # self.packet.calc_checksum += self.rx_byte
                 if self.packet.data_length:
                     self.packet_state = STATE_PAYLOAD
                     self.remaining_bytes = self.packet.data_length
@@ -189,6 +228,8 @@ class GBLink:
                 self.packet_state = STATE_CHECKSUM
                 self.remaining_bytes = 2
         
+        # the response bytes start getting sent in this part of the
+        # incoming packet
         elif self.packet_state == STATE_CHECKSUM:
             self.remaining_bytes -= 1
             if self.remaining_bytes == 1:
@@ -207,11 +248,24 @@ class GBLink:
             self.packet_state = STATE_IDLE
             self.complete_packet = True
 
-            self.packet_end = utime.ticks_us()                
-
         self.pio_mach.put(self.tx_byte)
     
-    def check_handle_packet(self):
+    def check_handle_packet(self) -> None:
+        """Check if there's a complete packet and handle it.
+        
+        Each command does the following things:
+        INIT - 
+        DATA - Copies data from GBPacket to the data buffer
+        PRINT - Sets flag that print is ready and saves margin info. Starts
+            off a counter to make the Game Boy think a print is actually
+            occuring for a short time (actual printing is done after the link
+            is complete and the Game Boy thinks it's done).
+        BREAK - Same as INIT
+        STATUS - Sends status info back to Game Boy. After a PRINT command,
+            ticks down the fake printing counter, then sets status to a 
+            completed print when the counter reaches zero.  
+        """
+
         if not self.complete_packet:
             return
         
@@ -224,11 +278,12 @@ class GBLink:
 
         if self.packet.command == COMMAND_INIT:
             self.printer_status = 0x00
+
         elif self.packet.command == COMMAND_DATA:
             if self.packet.data_length == 0:
                 print('Received stop data packet')
             else:
-                self.data_buffer.dma_copy_new_packet(self.packet)
+                self.data_buffer.copy_new_packet(self.packet)
                 pck = self.data_buffer.num_packets
                 cmp = bool(self.packet.compression_flag)
                 self.data_buffer.gb_compression_flag[pck] = cmp
@@ -239,6 +294,7 @@ class GBLink:
                 else:
                     self.lcd.set_cursor(7, 0)
                     self.lcd.print(str(self.data_buffer.num_packets))
+
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = 0x06
             if (self.packet.data[1] % 16) == 0:
@@ -248,8 +304,6 @@ class GBLink:
                 print('Will be end of print!')
                 self.end_of_print_data = True
             self.fake_print_ticks = 5
-            # self.lcd.clear()
-            # self.lcd.print("Printing")
         elif self.packet.command == COMMAND_BREAK:
             self.printer_status = 0x00
         elif self.packet.command == COMMAND_STATUS:
