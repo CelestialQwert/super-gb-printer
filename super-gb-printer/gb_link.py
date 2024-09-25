@@ -17,7 +17,7 @@ import pinout as pinn
 import utimeit
 
 # Add type hints for the rp2.PIO Instructions
-# IDE thinks the module is imported
+# VS Code thinks the module is imported
 # Actual code will have TYPE_CHECKING = False to prevent the import
 from typing_extensions import TYPE_CHECKING # type: ignore
 if TYPE_CHECKING:

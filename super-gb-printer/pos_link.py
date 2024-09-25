@@ -21,6 +21,7 @@ from ulab import numpy as np
 import data_buffer
 import fake_lcd
 import lcd_i2c
+import pinout as pinn
 import utimeit
 
 ROWS_PER_PACKET = const(16)
@@ -47,23 +48,19 @@ class POSLink:
             self, 
             buffer: Optional[data_buffer.DataBuffer] = None,
             lcd: AnyLCD = None,
-            uart: int = 0, 
-            tx_pin: int = 0,
-            rx_pin: int = 1
         ) -> None:
         """Instantiate the class.
         
         Args:
             buffer: DataBuffer instance
             lcd: LCD instance for an optional attached LCD screen
-            uart: Which UART to use, 0 or 1
-            tx_pin: TX pin for UART connection to printer
-            rx_pin: RX pin for UART connection to printer
         """
 
         self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
         self.lcd = lcd if lcd else fake_lcd.FakeLCD()
-        self.uart = UART(uart, baudrate=115200, tx=Pin(tx_pin), rx=Pin(rx_pin))
+        self.uart = UART(
+            0, baudrate=115200, tx=Pin(pinn.POS_TX), rx=Pin(pinn.POS_RX))
+        self.activity_led = Pin(pinn.POS_TX_ACTIVITY, Pin.OUT)
         self.zoomed_lut = {
             2: np.zeros((256, 2), dtype=np.uint8),
             3: np.zeros((256, 3), dtype=np.uint8),
@@ -212,10 +209,12 @@ class POSLink:
                 else:
                     # if not zoomed, just send the row data
                     tile_row_buffer = tone_payload[row,:]
+                self.activity_led.on()
                 for _ in range(zoom_y):
                     # need to send y times to create y-zoom
                     self.uart.write(tile_row_buffer.tobytes())
                     wait()
+                self.activity_led.off()
         print('done')
 
     def send_download_graphics_data_header(

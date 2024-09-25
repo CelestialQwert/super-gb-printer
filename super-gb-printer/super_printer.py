@@ -10,7 +10,7 @@ import utime
 import data_buffer
 import fake_lcd
 import gb_link
-import pinout as pin
+import pinout as pinn
 import pos_link
 import utimeit
 
@@ -25,7 +25,7 @@ class SuperPrinter():
 
     def __init__(self) -> None:
         try:
-            i2c = I2C(1, scl=pin.LCD_SCL, sda=pin.LCD_SDA, freq=300000)
+            i2c = I2C(1, scl=pinn.LCD_SCL, sda=pinn.LCD_SDA, freq=300000)
             self.lcd = LCD(addr=0x27, cols=16, rows=2, i2c=i2c)
             self.lcd.begin()
         except OSError:
@@ -35,10 +35,8 @@ class SuperPrinter():
         self.print_logo()
 
         self.data_buffer = data_buffer.DataBuffer(self.lcd)
-        self.gb_link = gb_link.GBLink(self.data_buffer, self.lcd)
-        self.pos_link = pos_link.POSLink(
-            self.data_buffer, self.lcd, pin.POS_UART, pin.POS_TX, pin.POS_RX
-        )
+        self.gb_link = gb_link.GBLink(self.data_buffer, self.lcd,)
+        self.pos_link = pos_link.POSLink(self.data_buffer, self.lcd)
     
     def run(self) -> None:
         """The method to run after instantiatng a SuperPrinter."""

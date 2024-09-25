@@ -17,7 +17,7 @@ import fake_lcd
 # the important nubmers that set how big the buffers are
 # most printable images are at most two screens tall, but what about all
 # the giant banners you can make in Super Mario Bros. Deluxe?
-NUM_GB_BUFFER_SCREENS = const(16)
+NUM_GB_BUFFER_SCREENS = const(8)
 NUM_POS_BUFFER_SCREENS = const(2)
 
 # constants to work out the size of data buffers
