@@ -145,7 +145,7 @@ class POSLink:
     
     def send_download_graphics_data(
         self, full_payload: list[np.ndarray], zoom_x: int = 1, 
-        zoom_y: int = 0, keycode: str = 'GB', 
+        zoom_y: int = -1, keycode: str = 'GB', 
     ):
         """Send data in printer data format to the printer.
         
@@ -170,12 +170,22 @@ class POSLink:
         y, x = first_tone_size
         
         #check zoom levels
-        if zoom_y == 0:
+        if zoom_y == -1:
             zoom_y = zoom_x
+
+        # Phys zoom - How much the image is scaled before being sent to 
+        # the printer. At zoom = 2, the print is not resized and the printer
+        # handles scaling it
+        phys_zoom_x = 1 if zoom_x < 3 else zoom_x
+        phys_zoom_y = 1 if zoom_y < 3 else zoom_y
+
+        # POS zoom - tells the printer to do the scaling when zoom = 2
+        pos_zoom_x = 2 if zoom_x == 2 else 1
+        pos_zoom_y = 2 if zoom_y == 2 else 1
 
         # send header
         self.send_download_graphics_data_header(
-            x * zoom_x, y * zoom_y, keycode=keycode
+            x * phys_zoom_x, y * phys_zoom_y, keycode=keycode
         )
 
         # Tell everyone we're about to start sending data
@@ -189,7 +199,7 @@ class POSLink:
             self.lcd.print(f"Page {cp}/{nump}")
         
         # start sending data
-        tile_row_buffer = np.zeros(x * zoom_x, dtype=np.uint8)
+        tile_row_buffer = np.zeros(x * phys_zoom_x, dtype=np.uint8)
         for i, tone_payload in enumerate(full_payload):
             print(f"sending tone {i}")
             self.send_tone_number(i)
@@ -200,17 +210,17 @@ class POSLink:
                     d = y // 4
                     self.lcd.set_cursor(8, 0)
                     self.lcd.print(f"{n:02}/{d:02}")
-                if zoom_x > 1:
+                if phys_zoom_x >= 3:
                     for px in range(x):
                         # stretch each byte by amout of x-zoom
-                        tile_row_buffer[px*zoom_x:(px+1)*zoom_x] = (
-                            self.zoomed_lut[zoom_x][tone_payload[row,px]]
+                        tile_row_buffer[px*phys_zoom_x:(px+1)*phys_zoom_x] = (
+                            self.zoomed_lut[phys_zoom_x][tone_payload[row,px]]
                         )
                 else:
                     # if not zoomed, just send the row data
                     tile_row_buffer = tone_payload[row,:]
                 self.activity_led.on()
-                for _ in range(zoom_y):
+                for _ in range(phys_zoom_y):
                     # need to send y times to create y-zoom
                     self.uart.write(tile_row_buffer.tobytes())
                     wait()
@@ -267,15 +277,20 @@ class POSLink:
         wait()
     
     def print_download_graphics_data(
-            self, keycode: str = 'GB' , x: int = 1, y: int = 1
+            self, zoom_x: int = 1, zoom_y: int = -1, keycode: str = 'GB'
         ):
         """Send the header portion of the send download graphics data command.
         
         Args:
-            x: Horizontal dimension of data
-            y: Vertical dimension of data
+            zoom_x: Horizontal zoom of data, 1 or 2
+            zoom_y: Vertical zoom of data, 1 or 2
             keycode: Code that the data is stored under inside printer
         """
+        if zoom_y == -1:
+            zoom_y = zoom_x
+        
+        x = 2 if zoom_x == 2 else 1
+        y = 2 if zoom_y == 2 else 1
         
         kc1, kc2 = [ord(x) for x in keycode]
         # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lparen_cl_fn85.html

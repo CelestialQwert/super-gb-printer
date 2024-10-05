@@ -32,19 +32,19 @@ class PinManager():
 
     @property
     def scale_2x(self):
-        """Sets whether the print is scaled by 2x."""
+        """Sets whether the print is scaled by 2x.
+        
+        Overrides the no scale setting when enabled.
+        """
         return self.dip_switches[0].value()
     
     @property
-    def scale_3x(self):
-        """Sets whether the print is scaled by 3x.
-        
-        Overrides the 2x scale setting when enabled.
-        """
+    def no_scale(self):
+        """Sets whether the print is not scaled."""
         return self.dip_switches[1].value()
     
     @property
-    def margin_mode(self):
+    def add_bottom_margin(self):
         """Sets whether a bottom margin is added.
         
         When enabled, a bottom margin is added that makes centers the image

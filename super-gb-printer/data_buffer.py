@@ -135,17 +135,21 @@ class DataBuffer():
             trigger = True
         )
         
-    def convert_page_of_packets(self, page: int) -> None:
+    def convert_page_of_packets(self, page: int) -> int:
         """Converts one page (18 packets) of data.
         
         Args:
             page: Naturally, the page to convert
+        
+        Returns:
+            Number of packets converted
         """
 
         self.current_page = page + 1
         p_low = page*18
         p_hi = min((page+1)*18, self.num_packets)
         self.convert_packet_range(p_low, p_hi)
+        return p_hi - p_low
         
     def convert_packet_range(self, start: int, end: int) -> None:
         """Converts a range of packets from GB tile to POS graphics format.

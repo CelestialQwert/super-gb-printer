@@ -48,7 +48,6 @@ class SuperPrinter():
 
         try:
             self.gb_link.startup()
-            self.pos_link.set_justification(1)
             self.main_loop()
         except (Exception, KeyboardInterrupt) as e:
             self.gb_link.shutdown_pio_mach()
@@ -89,18 +88,28 @@ class SuperPrinter():
 
         self.gb_link.shutdown_pio_mach()
         print('Commencing print')
+        self.pos_link.set_justification(1)
+        if self.btn.scale_2x:
+            zoom = 2
+        elif self.btn.no_scale:
+            zoom = 1
+        else:
+            zoom = 3
         for p in range(self.data_buffer.num_pages):
             print(f'Sending page {p+1} of {self.data_buffer.num_pages}')
-            self.data_buffer.convert_page_of_packets(p)
-            self.pos_link.send_data_buffer_to_download()
+            num_pkts = self.data_buffer.convert_page_of_packets(p)
+            self.pos_link.send_data_buffer_to_download(zoom)
             self.lcd.set_cursor(0, 0)
             self.lcd.print("Printing page...")
-            self.pos_link.print_download_graphics_data()
-            utime.sleep(2)
+            self.pos_link.print_download_graphics_data(zoom)
+            utime.sleep(.15 * num_pkts)
         self.lcd.clear()
         self.lcd.print("Print complete!")
         utime.sleep(.5)
-        self.pos_link.cut(feed_height=184)
+        if self.btn.add_bottom_margin:
+            self.pos_link.cut(feed_height=184)
+        else:
+            self.pos_link.cut()
         self.gb_link.startup_pio_mach(keep_message=True)
     
     gb_chars = [

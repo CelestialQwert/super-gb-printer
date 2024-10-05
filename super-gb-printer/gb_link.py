@@ -145,10 +145,7 @@ class GBLink:
         packet and data buffer is discarded, and some other things are reset.
         """
         this_time = utime.ticks_ms()
-        if (
-            utime.ticks_diff(this_time, self.last_packet_time) > 3000
-            or self.btn.buttons[0].value()
-        ):
+        if (utime.ticks_diff(this_time, self.last_packet_time) > 3000):
             self.shutdown_pio_mach()
             self.startup_pio_mach()
         
