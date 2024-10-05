@@ -7,13 +7,11 @@ import rp2
 import utime
 from machine import Pin
 from micropython import const
-from typing import Optional, Union
 from ulab import numpy as np
 
 import data_buffer
-import fake_lcd
-import lcd_i2c
 import pinout as pinn
+import super_printer
 import utimeit
 
 # Add type hints for the rp2.PIO Instructions
@@ -70,22 +68,19 @@ def gb_link_pio():
 class GBLink:
     """Contains methods that handle the connection to the Game Boy."""
 
-    AnyLCD = Union[lcd_i2c.LCD, fake_lcd.FakeLCD, None]
-
     def __init__(
-            self, 
-            buffer: Optional[data_buffer.DataBuffer] = None,
-            lcd: AnyLCD = None
+            self,
+            parent: super_printer.SuperPrinter
         ):
         """Instantiate the class.
         
         Args:
-            buffer: DataBuffer instance
-            lcd: LCD instance for an optional attached LCD screen
+            parent: The Parent SuperPrinter object.
         """
-
-        self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
-        self.lcd = lcd if lcd else fake_lcd.FakeLCD()
+        self.parent = parent
+        self.btn = self.parent.btn
+        self.data_buffer = self.parent.data_buffer
+        self.lcd = self.parent.lcd
         self.pio_mach = rp2.StateMachine(
             0, gb_link_pio, 
             in_base=Pin(pinn.GB_IN),
@@ -105,13 +100,14 @@ class GBLink:
         self.end_of_print_data = False
         self.last_packet_time = utime.ticks_ms()
         self.fake_print_ticks = 0
+        self.send_early_status_byte = True
 
     def startup(self) -> None:
         """Initialize the GB link."""
 
         self.pio_mach.irq(self.gb_interrupt)
         self.shutdown_pio_mach()
-        self.startup_pio_mach()
+        self.startup_pio_mach(keep_message=True)
         print('gb link ready!')
     
     def shutdown_pio_mach(self) -> None:
@@ -128,14 +124,19 @@ class GBLink:
             self.pio_mach.exec('pull(noblock)')
             self.pio_mach.exec('out(null, 32)')
 
-    def startup_pio_mach(self) -> None:
+    def startup_pio_mach(self, keep_message: bool = False) -> None:
         """Start up link PIO and add initial status byte 0."""
         
         print('Starting PIO')
         self.pio_mach.restart()
         self.pio_enabled_led.on()
+        self.initialize_emu_printer()
+        if not keep_message:
+            self.lcd.clear()
+            self.lcd.print("Ready")
         self.pio_mach.active(1)
         self.pio_mach.put(0)
+        self.last_packet_time = utime.ticks_ms()
     
     def check_timeout(self) -> None:
         """Check if the GB link has timed out.
@@ -144,16 +145,19 @@ class GBLink:
         packet and data buffer is discarded, and some other things are reset.
         """
         this_time = utime.ticks_ms()
-        if utime.ticks_diff(this_time, self.last_packet_time) > 3000:
-            print(f'Printer timeout at {this_time}')
+        if (
+            utime.ticks_diff(this_time, self.last_packet_time) > 3000
+            or self.btn.buttons[0].value()
+        ):
             self.shutdown_pio_mach()
-            self.packet_state = STATE_IDLE
-            self.printer_status = 0
-            self.data_buffer.clear_packets()
-            self.lcd.clear()
-            self.lcd.print("Ready")
             self.startup_pio_mach()
-            self.last_packet_time = utime.ticks_ms()
+        
+    def initialize_emu_printer(self):
+        """Resets states/buffers related to the emulated printer."""
+
+        self.packet_state = STATE_IDLE
+        self.printer_status = 0x00
+        self.data_buffer.clear_packets()
     
     def check_print_ready(self) -> bool:
         """Checks if a print is ready to start.
@@ -183,6 +187,13 @@ class GBLink:
         else:
             print('no RX FIFO byte!')
             self.rx_ryte = 0
+        
+        # This delay forces the timing of sending TX bytes to the Game Boy
+        # to drift one byte. Without it, the timing of bytes compared to when
+        # the TX byte is sent to the PIO TX FIFO is inconsistent for some
+        # titles (like the Game Boy Camera), causing the title to throw an 
+        # error.
+        utime.sleep_us(50)
 
         # by default, send 0 byte back
         self.tx_byte = 0x00
@@ -190,7 +201,6 @@ class GBLink:
         if self.packet_state == STATE_IDLE:
             if self.rx_byte == 0x88:
                 self.packet_state = STATE_MAGICBYTES_PARTIAL
-                self.packet_start = utime.ticks_us()
             else:
                 print('First magic byte bad!')
 
@@ -200,7 +210,6 @@ class GBLink:
                 self.remaining_bytes = 4
             else:
                 print('Second magic byte bad!')
-                self.tx_byte = 0x40
                 self.packet_state = STATE_IDLE
 
         elif self.packet_state == STATE_HEADER:
@@ -234,19 +243,30 @@ class GBLink:
             self.remaining_bytes -= 1
             if self.remaining_bytes == 1:
                 self.packet.checksum = self.rx_byte
+                # can always send this here, desired if status byte is sent
+                # early and ignored by Game Boy if sent on time
                 self.tx_byte = 0x81 # first response byte
             else:
                 self.packet.checksum += self.rx_byte * 256
                 self.packet_state = STATE_RESPONSE_READY
-                self.tx_byte = self.printer_status #0x81 # first response byte
+                # where which byte gets sent matters
+                if self.send_early_status_byte:
+                    self.tx_byte = self.printer_status
+                else:
+                    self.tx_byte = 0x81
+                # self.tx_byte = 0x81
         
         elif self.packet_state == STATE_RESPONSE_READY:
             self.packet_state = STATE_RESPONSE_PARTIAL
+            # can always send this here, desired if status byte is sent
+            # on time and ignored by Game Boy if sent early
             self.tx_byte = self.printer_status
 
         elif self.packet_state == STATE_RESPONSE_PARTIAL:
             self.packet_state = STATE_IDLE
             self.complete_packet = True
+            # print(self.rx_byte, utime.ticks_us() - self.last_byte_time)
+            # self.last_byte_time = utime.ticks_us()
 
         self.pio_mach.put(self.tx_byte)
     
@@ -268,16 +288,16 @@ class GBLink:
 
         if not self.complete_packet:
             return
-        
+     
         print(
             f'Packet type: {self.packet.command}, '
             f'Printer status: {self.printer_status}, '
             f'Print ticks: {self.fake_print_ticks}, ' 
-            # f'Packet time: {utime.ticks_ms()}'
+            f'Packet time: {utime.ticks_ms()}'
         )
 
         if self.packet.command == COMMAND_INIT:
-            self.printer_status = 0x00
+            self.initialize_emu_printer()
 
         elif self.packet.command == COMMAND_DATA:
             if self.packet.data_length == 0:
@@ -288,24 +308,23 @@ class GBLink:
                 cmp = bool(self.packet.compression_flag)
                 self.data_buffer.gb_compression_flag[pck] = cmp
                 self.printer_status = 0x08
-                if self.data_buffer.num_packets == 1:
-                    self.lcd.clear()
-                    self.lcd.print("Packet 1")
-                else:
-                    self.lcd.set_cursor(7, 0)
-                    self.lcd.print(str(self.data_buffer.num_packets))
 
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = 0x06
+            pck = self.data_buffer.num_packets
+            self.lcd.clear()
+            self.lcd.print(f"Got {pck:02} packets")
             if (self.packet.data[1] % 16) == 0:
                 print('This is not the end of a print!')
                 self.end_of_print_data = False
             else:
                 print('Will be end of print!')
                 self.end_of_print_data = True
-            self.fake_print_ticks = 5
+            self.fake_print_ticks = 10
+
         elif self.packet.command == COMMAND_BREAK:
-            self.printer_status = 0x00
+            self.initialize_emu_printer()
+            
         elif self.packet.command == COMMAND_STATUS:
             if self.printer_status == 0x06:
                 self.fake_print_ticks -= 1
@@ -316,6 +335,3 @@ class GBLink:
                     
         self.complete_packet = False
         self.last_packet_time = utime.ticks_ms()
-
-if __name__ == "__main__":
-    gb_link = GBLink()

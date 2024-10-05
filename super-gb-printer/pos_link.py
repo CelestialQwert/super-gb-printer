@@ -112,7 +112,7 @@ class POSLink:
                 1, 49 - centered
                 2, 50 - right
         """
-
+        # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/esc_la.html
         #                      ESC a  n
         self.uart.write(bytes([27, 97, n]))
         wait()
@@ -283,11 +283,16 @@ class POSLink:
         self.uart.write(bytes([29, 40, 76,  6,  0, 48, 85, kc1, kc2, x, y]))
         wait()
 
-    def cut(self, feed_height: int = 10):
+    def cut(self, feed_height: int = 0):
         """Send command to cut the paper.
         
         Args:
-            fed_height: Height of bottom margin before cut
+            fed_height: 
+                Height of bottom margin before cut in increments of 
+                1/360 inches (that 360 is adjustable with GS P command).
+                A feed height of 184 is ~13 mm, plus the ~2 mm margin always
+                present after a cut, gives the same 15 mm margin that the top
+                of the print has (margin between cut and print heads).
         """
         # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_cv.html
         #                      GS  V   m   n

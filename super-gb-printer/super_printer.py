@@ -12,6 +12,7 @@ import fake_lcd
 import gb_link
 import pinout as pinn
 import pos_link
+import pin_manager
 import utimeit
 
 from lcd_i2c import LCD
@@ -24,6 +25,10 @@ class SuperPrinter():
     """
 
     def __init__(self) -> None:
+        """Instantiate the class."""
+
+        self.btn = pin_manager.PinManager()
+
         try:
             i2c = I2C(1, scl=pinn.LCD_SCL, sda=pinn.LCD_SDA, freq=300000)
             self.lcd = LCD(addr=0x27, cols=16, rows=2, i2c=i2c)
@@ -35,7 +40,7 @@ class SuperPrinter():
         self.print_logo()
 
         self.data_buffer = data_buffer.DataBuffer(self.lcd)
-        self.gb_link = gb_link.GBLink(self.data_buffer, self.lcd,)
+        self.gb_link = gb_link.GBLink(self)
         self.pos_link = pos_link.POSLink(self.data_buffer, self.lcd)
     
     def run(self) -> None:
@@ -53,19 +58,19 @@ class SuperPrinter():
             raise e
     
     def main_loop(self) -> None:
-            """The main loop.
+        """The main loop.
 
-            Runs continuously, checking if certain things are ready.
-            """
+        Runs continuously, checking if certain things are ready.
+        """
 
+        while True:
+            self.last_packet_time = utime.ticks_ms()
             while True:
-                self.last_packet_time = utime.ticks_ms()
-                while True:
-                    # byte handling done via PIO and IRQ method in gb_link
-                    self.gb_link.check_handle_packet()
-                    if self.gb_link.check_print_ready():
-                        self.print()
-                    self.gb_link.check_timeout()
+                # byte handling done via PIO and IRQ method in gb_link
+                self.gb_link.check_handle_packet()
+                if self.gb_link.check_print_ready():
+                    self.print()
+                self.gb_link.check_timeout()
 
     def print(self) -> None:
         """Runs a print job.
@@ -83,21 +88,20 @@ class SuperPrinter():
         """
 
         self.gb_link.shutdown_pio_mach()
+        print('Commencing print')
         for p in range(self.data_buffer.num_pages):
             print(f'Sending page {p+1} of {self.data_buffer.num_pages}')
             self.data_buffer.convert_page_of_packets(p)
             self.pos_link.send_data_buffer_to_download()
             self.lcd.set_cursor(0, 0)
             self.lcd.print("Printing page...")
-            utime.sleep(1)
             self.pos_link.print_download_graphics_data()
             utime.sleep(2)
         self.lcd.clear()
         self.lcd.print("Print complete!")
         utime.sleep(.5)
-        self.pos_link.cut()
-        self.data_buffer.clear_packets()
-        self.gb_link.startup_pio_mach()
+        self.pos_link.cut(feed_height=184)
+        self.gb_link.startup_pio_mach(keep_message=True)
     
     gb_chars = [
         [0x1F, 0x10, 0x17, 0x17, 0x17, 0x17, 0x17, 0x00],
@@ -121,11 +125,7 @@ class SuperPrinter():
         self.lcd.print(chr(2) + chr(3) + ' GB Printer')
 
 
-def main():
+if __name__ == "__main__":
     printer = SuperPrinter()
     printer.run()
-
-
-if __name__ == "__main__":
-    main()
   
