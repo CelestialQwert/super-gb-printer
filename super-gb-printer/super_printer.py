@@ -48,10 +48,14 @@ class SuperPrinter():
 
         try:
             self.gb_link.startup()
+            self.pos_link.init_printer()
             self.main_loop()
         except (Exception, KeyboardInterrupt) as e:
             self.gb_link.shutdown_pio_mach()
             self.lcd.clear()
+            Pin(pinn.GB_LED_ACTIVITY, Pin.OUT).off()
+            Pin(pinn.GB_PIO_ENABLED, Pin.OUT).off()
+            Pin(pinn.POS_TX_ACTIVITY, Pin.OUT).off()
             print(dir(e))
             self.lcd.print(e.__class__.__name__)
             raise e

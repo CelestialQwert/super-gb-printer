@@ -98,7 +98,7 @@ class POSLink:
 
     def init_printer(self) -> None:
         """Send printer init command."""
-
+        self.activity_led.off()
         #                      ESC  @
         self.uart.write(bytes([27, 64]))
         wait()

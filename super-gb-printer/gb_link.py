@@ -105,6 +105,8 @@ class GBLink:
     def startup(self) -> None:
         """Initialize the GB link."""
 
+        self.pio_enabled_led.off()
+        # Pin(pinn.GB_LED_ACTIVITY, Pin.OUT).off()
         self.pio_mach.irq(self.gb_interrupt)
         self.shutdown_pio_mach()
         self.startup_pio_mach(keep_message=True)
@@ -294,7 +296,8 @@ class GBLink:
         )
 
         if self.packet.command == COMMAND_INIT:
-            self.initialize_emu_printer()
+            # self.initialize_emu_printer()
+            pass
 
         elif self.packet.command == COMMAND_DATA:
             if self.packet.data_length == 0:
