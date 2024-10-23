@@ -57,7 +57,10 @@ class PinManager():
         """Sets whether the print is automatically cut.
         
         Disable it when printing custom banners, such as with Donkey Kong
-        Country.
+        Country (which isn't working right now).
+
+        *****Currently unused*****
+        
         """
         return self.dip_switches[3].value()
         

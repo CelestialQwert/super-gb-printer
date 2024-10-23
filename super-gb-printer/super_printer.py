@@ -93,10 +93,10 @@ class SuperPrinter():
         self.gb_link.shutdown_pio_mach()
         print('Commencing print')
         self.pos_link.set_justification(1)
-        if self.btn.scale_2x:
-            zoom = 2
-        elif self.btn.no_scale:
+        if self.btn.no_scale:
             zoom = 1
+        elif self.btn.scale_2x:
+            zoom = 2
         else:
             zoom = 3
         for p in range(self.data_buffer.num_pages):

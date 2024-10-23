@@ -1,6 +1,7 @@
 # super-gb-printer
-A Game Boy to Epson POS printer interface using a Raspberry Pi Pico. Inspired
-by the [gbpxl](https://github.com/xx0x/gbpxl) project and its [multi-tone fork](https://github.com/cristofercruz/gbpxl). 
+A Game Boy to Epson POS printer interface using a Raspberry Pi Pico and 
+written in Micropython. Inspired by the [gbpxl](https://github.com/xx0x/gbpxl)
+project and its [multi-tone fork](https://github.com/cristofercruz/gbpxl). 
 
 ![demonstration](./demonstration.jpg)
 
@@ -43,8 +44,15 @@ Pinout can be customeized by editing the file pinout.py.
 | LCD SDA                     |             26 |
 | LCD SCL                     |             27 |
 
-*Pins connected to the Game Boy must go through the level shifter or you may
-damage the Pi Pico!
+## DIP Switch Settings
+
+| Switch | Setting            | OFF               | ON                 |
+|:-------|:-------------------|:------------------|:-------------------|
+| 1      | Scale amount       | 3x scale          | 2x scale           |
+| 2      | Scale amount       | Switch 1 setting  | 1x scale           |
+| 3      | Bottom Margin      | Do not add margin | Add margin         |
+| 4      | Unused             | --                | --                 |
+| 5      | Unused             | --                | --                 |
 
 ## Build Information
 The Micropython build you use on the Pico must include the 
@@ -56,3 +64,5 @@ Diagrams coming Soon™, the image above and these notes may suffice for now:
 - Connect the HV of the level shifter to VSYS on the Pico instead of the
   Game Boy. (LV of course will be 3V3 from the Pico.)
 - DIP switches are active high and should be connected to 3V3 on the Pico.
+- Pins connected to the Game Boy must go through the level shifter or you may
+  damage the Pico!
