@@ -156,6 +156,5 @@ Pico-W-Stub
 .picowgo
 venv_picoprint
 .micropico-stubs
-lcd_i2c/
 .micropico
 prototypes/

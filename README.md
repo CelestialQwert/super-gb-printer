@@ -1,6 +1,6 @@
 # super-gb-printer
 A Game Boy to Epson POS printer interface using a Raspberry Pi Pico and 
-written in Micropython. Inspired by the [gbpxl](https://github.com/xx0x/gbpxl)
+written in MicroPython. Inspired by the [gbpxl](https://github.com/xx0x/gbpxl)
 project and its [multi-tone fork](https://github.com/cristofercruz/gbpxl). 
 
 ![demonstration](./demonstration.jpg)
@@ -32,9 +32,9 @@ Pinout can be customeized by editing the file pinout.py.
 
 | Description                 | Default Pin(s) |
 |:----------------------------|:---------------|
-| Game Boy CLK *              |              2 |
-| Game Boy SI *               |              4 |
-| Game Boy SO *               |              5 |
+| Game Boy CLK                |              2 |
+| Game Boy SI                 |              4 |
+| Game Boy SO                 |              5 |
 | GB Link Enabled LED         |              6 |
 | GB Data RX LED              |              7 |
 | Printer UART Activity LED   |              7 |
