@@ -19,7 +19,7 @@ from typing import Optional, Union
 from ulab import numpy as np
 
 import data_buffer
-import fake_lcd
+import lcd
 import lcd_i2c
 import pinout as pinn
 import utimeit
@@ -42,12 +42,12 @@ class POSLink:
     configuring settings and sending data and commands.
     """
 
-    AnyLCD = Union[lcd_i2c.LCD, fake_lcd.FakeLCD, None]
+    AnyLCD = Union[lcd_i2c.LCD, lcd.FakeLCD, None]
 
     def __init__(
             self, 
             buffer: Optional[data_buffer.DataBuffer] = None,
-            lcd: AnyLCD = None,
+            in_lcd: AnyLCD = None,
         ) -> None:
         """Instantiate the class.
         
@@ -57,7 +57,7 @@ class POSLink:
         """
 
         self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
-        self.lcd = lcd if lcd else fake_lcd.FakeLCD()
+        self.lcd = in_lcd if in_lcd else lcd.FakeLCD()
         self.uart = UART(
             0, baudrate=115200, tx=Pin(pinn.POS_TX), rx=Pin(pinn.POS_RX))
         self.activity_led = Pin(pinn.POS_TX_ACTIVITY, Pin.OUT)

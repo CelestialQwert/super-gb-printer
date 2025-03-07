@@ -3,7 +3,7 @@ from lcd_i2c import LCD
 from machine import I2C
 
 class FakeLCD():
-    """Fake LCD class for when the screen isn't available.
+    """Fake LCD class for when the real display isn't available.
     
     Most methods do nothing, but the print method redirects to stdout.
     """
@@ -26,6 +26,7 @@ class FakeLCD():
         pass
 
 def setup_lcd(scl: int = 0, sda: int = 0) -> Union[LCD, FakeLCD]:
+    """Setup a real LCD display, or failing that create a fake one."""
 
     try:
         i2c = I2C(1, scl=scl, sda=sda, freq=300000)

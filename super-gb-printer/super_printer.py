@@ -33,7 +33,7 @@ class SuperPrinter():
         self.print_logo()
 
         self.data_buffer = data_buffer.DataBuffer(self.lcd)
-        self.gb_link = gb_link.GBLink(self)
+        self.gb_link = gb_link.GBLink(self.btn, self.data_buffer, self.lcd)
         self.pos_link = pos_link.POSLink(self.data_buffer, self.lcd)
     
     def run(self) -> None:

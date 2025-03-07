@@ -7,11 +7,14 @@ import rp2
 import utime
 from machine import Pin
 from micropython import const
+from typing import Union, Optional
 from ulab import numpy as np
 
 import data_buffer
+import lcd_i2c
 import pinout as pinn
-import super_printer
+import pin_manager
+import lcd
 import utimeit
 
 # Add type hints for the rp2.PIO Instructions
@@ -68,19 +71,19 @@ def gb_link_pio():
 class GBLink:
     """Contains methods that handle the connection to the Game Boy."""
 
+    AnyLCD = Union[lcd_i2c.LCD, lcd.FakeLCD, None]
+
     def __init__(
             self,
-            parent: super_printer.SuperPrinter
+            btn: Optional[pin_manager.PinManager] = None,
+            buffer: Optional[data_buffer.DataBuffer] = None,
+            in_lcd: AnyLCD = None
         ):
-        """Instantiate the class.
-        
-        Args:
-            parent: The Parent SuperPrinter object.
-        """
-        self.parent = parent
-        self.btn = self.parent.btn
-        self.data_buffer = self.parent.data_buffer
-        self.lcd = self.parent.lcd
+        """Instantiate the class."""
+
+        self.btn = btn if btn else pin_manager.PinManager()
+        self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
+        self.lcd = in_lcd if in_lcd else lcd.FakeLCD()
         self.pio_mach = rp2.StateMachine(
             0, gb_link_pio, 
             in_base=Pin(pinn.GB_IN),
