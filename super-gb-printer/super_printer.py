@@ -4,18 +4,18 @@ Main script for the Super GB Printer. Will eventually get called main.py
 when this whole thing is done.
 """
 
-from machine import I2C, Pin
+from machine import Pin
 import utime
 
 import data_buffer
-import fake_lcd
+import lcd
 import gb_link
 import pinout as pinn
 import pos_link
 import pin_manager
 import utimeit
 
-from lcd_i2c import LCD
+
 
 class SuperPrinter():
     """Top level class for the printer.
@@ -29,14 +29,7 @@ class SuperPrinter():
 
         self.btn = pin_manager.PinManager()
 
-        try:
-            i2c = I2C(1, scl=pinn.LCD_SCL, sda=pinn.LCD_SDA, freq=300000)
-            self.lcd = LCD(addr=0x27, cols=16, rows=2, i2c=i2c)
-            self.lcd.begin()
-        except OSError:
-            print('Did not find LCD screen!')
-            self.lcd = fake_lcd.FakeLCD()
-        self.lcd.clear()
+        self.lcd = lcd.setup_lcd(scl=pinn.LCD_SCL, sda=pinn.LCD_SDA)
         self.print_logo()
 
         self.data_buffer = data_buffer.DataBuffer(self.lcd)
