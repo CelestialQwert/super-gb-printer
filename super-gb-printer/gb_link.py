@@ -71,13 +71,11 @@ def gb_link_pio():
 class GBLink:
     """Contains methods that handle the connection to the Game Boy."""
 
-    AnyLCD = Union[lcd_i2c.LCD, lcd.FakeLCD, None]
-
     def __init__(
             self,
             btn: Optional[pin_manager.PinManager] = None,
             buffer: Optional[data_buffer.DataBuffer] = None,
-            in_lcd: AnyLCD = None
+            in_lcd: Optional[lcd.AnyLCD] = None
         ):
         """Instantiate the class."""
 

@@ -37,3 +37,5 @@ def setup_lcd(scl: int = 0, sda: int = 0) -> Union[LCD, FakeLCD]:
         lcd = FakeLCD()
     lcd.clear()
     return lcd
+
+AnyLCD = Union[LCD, FakeLCD]

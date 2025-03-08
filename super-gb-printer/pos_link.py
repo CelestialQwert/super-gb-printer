@@ -42,12 +42,11 @@ class POSLink:
     configuring settings and sending data and commands.
     """
 
-    AnyLCD = Union[lcd_i2c.LCD, lcd.FakeLCD, None]
 
     def __init__(
             self, 
             buffer: Optional[data_buffer.DataBuffer] = None,
-            in_lcd: AnyLCD = None,
+            in_lcd: Optional[lcd.AnyLCD] = None,
         ) -> None:
         """Instantiate the class.
         

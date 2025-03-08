@@ -6,13 +6,11 @@ includes methods for manipulating data between different buffers.
 """
 
 import rp2
-import typing
 from micropython import const
+from typing import Optional
 from ulab import numpy as np
 
-import lcd_i2c
-import fake_lcd
-
+import lcd
 
 # the important nubmers that set how big the buffers are
 # most printable images are at most two screens tall, but what about all
@@ -64,17 +62,15 @@ class DataBuffer():
     GB packets, and graphics data to be sent to the the POS printer. It also 
     includes methods for manipulating data between different buffers.
     """
-
-    AnyLCD = typing.Union[lcd_i2c.LCD, fake_lcd.FakeLCD, None]
-    
-    def __init__(self, lcd: AnyLCD = None) -> None:
+   
+    def __init__(self, in_lcd: Optional[lcd.AnyLCD] = None) -> None:
         """Instantiate the class.
         
         Args:
             lcd: LCD instance for an optional attached LCD screen
         """
 
-        self.lcd = lcd if lcd else fake_lcd.FakeLCD()
+        self.lcd = in_lcd if in_lcd else lcd.FakeLCD()
 
         self.gb_buffer = np.zeros(GB_DATA_BUFFER_DIMS, dtype=np.uint8)
         self.decomp_buffer = np.zeros(PACKET_SIZE, dtype=np.uint8)
