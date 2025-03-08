@@ -42,6 +42,12 @@ COMMAND_DATA = const(4)
 COMMAND_BREAK = const(8)
 COMMAND_STATUS = const(0xF)
 
+# status values for GB printer
+PRINTER_IDLE = const(0)
+PRINTER_READY_TO_PRINT = const(8)
+PRINTER_PRINTING = const(6)
+PRINTER_COMPLETE = const(4)
+
 # PIO program for interacing with Game Boy
 @rp2.asm_pio(
     in_shiftdir=rp2.PIO.SHIFT_LEFT,
@@ -97,7 +103,7 @@ class GBLink:
         self.complete_packet = False
         self.rx_byte = 0
         self.tx_byte = 0
-        self.printer_status = 0
+        self.printer_status = PRINTER_IDLE
         self.end_of_print_data = False
         self.last_packet_time = utime.ticks_ms()
         self.fake_print_ticks = 0
@@ -156,7 +162,7 @@ class GBLink:
         """Resets states/buffers related to the emulated printer."""
 
         self.packet_state = STATE_IDLE
-        self.printer_status = 0x00
+        self.printer_status = PRINTER_IDLE
         self.data_buffer.clear_packets()
     
     def check_print_ready(self) -> bool:
@@ -308,10 +314,10 @@ class GBLink:
                 pck = self.data_buffer.num_packets
                 cmp = bool(self.packet.compression_flag)
                 self.data_buffer.gb_compression_flag[pck] = cmp
-                self.printer_status = 0x08
+                self.printer_status = PRINTER_READY_TO_PRINT
 
         elif self.packet.command == COMMAND_PRINT:
-            self.printer_status = 0x06
+            self.printer_status = PRINTER_PRINTING
             pck = self.data_buffer.num_packets
             self.lcd.clear()
             self.lcd.print(f"Got {pck:02} packets")
@@ -327,12 +333,12 @@ class GBLink:
             self.initialize_emu_printer()
             
         elif self.packet.command == COMMAND_STATUS:
-            if self.printer_status == 0x06:
+            if self.printer_status == PRINTER_PRINTING:
                 self.fake_print_ticks -= 1
                 if self.fake_print_ticks == 0:
-                    self.printer_status = 0x04
-            elif self.printer_status == 0x04:
-                self.printer_status = 0x00
+                    self.printer_status = PRINTER_COMPLETE
+            elif self.printer_status == PRINTER_COMPLETE:
+                self.printer_status = PRINTER_IDLE
                     
         self.complete_packet = False
         self.last_packet_time = utime.ticks_ms()
