@@ -1,49 +1,30 @@
-from machine import I2C, Pin
-from lcd_i2c import LCD
 import time
 import _thread
 
 import pinout as pinn
-import super_printer
+import gb_link
+import lcd
 
 def main() -> None:
     try:
         _thread.start_new_thread(lcd_thread, ())
         main_thread()
     except BaseException as e:
-        print(f"Got exception '{e}'!")
+        print(f"Got exception '{e.__class__.__name__}'!")
         _thread.exit()
         raise
 
 def lcd_thread() -> None:
-    i2c = I2C(1, scl=pinn.LCD_SCL, sda=pinn.LCD_SDA, freq=300000)
-    lcd = LCD(addr=0x27, cols=16, rows=2, i2c=i2c)
-    lcd.begin()
+    main_lcd = lcd.AsyncLCD(scl=pinn.LCD_SCL, sda=pinn.LCD_SDA)
 
-    gb_chars = [
-        [0x1F, 0x10, 0x17, 0x17, 0x17, 0x17, 0x17, 0x00],
-        [0x1F, 0x01, 0x1D, 0x1D, 0x1D, 0x1D, 0x1D, 0x00],
-        [0x12, 0x17, 0x12, 0x10, 0x11, 0x10, 0x1F, 0x00],
-        [0x01, 0x05, 0x09, 0x01, 0x11, 0x03, 0x1E, 0x00]
-    ]
-
-    backslash = [0, 0x10, 0x08, 0x04, 0x02, 0x01, 0, 0]
-
-    for i, gb_char in enumerate(gb_chars):
-        lcd.create_char(i, gb_char)
-    lcd.create_char(4, backslash)
-
-    lcd.clear()
-    lcd.print(chr(0) + chr(1) + ' SUPER')
-    lcd.set_cursor(0, 1)
-    lcd.print(chr(2) + chr(3) + ' Cool printr')
+    main_lcd.lcd_title_screen()
 
     time.sleep(.2)
 
     while True:
         for c in ['/', '-', chr(4), '|']:
-            lcd.set_cursor(14,0)
-            lcd.print(c)
+            main_lcd.lcd.set_cursor(14,0)
+            main_lcd.lcd.print(c)
             time.sleep(.5)
 
 def light_thread() -> None:
@@ -56,8 +37,11 @@ def light_thread() -> None:
             time.sleep(.25)
     
 def main_thread() -> None:
-    printer = super_printer.SuperPrinter()
-    printer.run()
+    gameboy_link = gb_link.GBLink()
+    gameboy_link.startup()
+    while True:
+        gameboy_link.check_handle_packet()
+        gameboy_link.check_timeout()
 
 if __name__ == "__main__":
     main()
