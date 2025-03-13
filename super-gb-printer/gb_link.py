@@ -7,13 +7,11 @@ import rp2
 import utime
 from machine import Pin
 from micropython import const
-from typing import Union, Optional
-from ulab import numpy as np
+from typing import Optional
+# from ulab import numpy as np
 
 import data_buffer
-import lcd_i2c
 import pinout as pinn
-import pin_manager
 import lcd
 import utimeit
 
@@ -79,15 +77,13 @@ class GBLink:
 
     def __init__(
             self,
-            btn: Optional[pin_manager.PinManager] = None,
-            buffer: Optional[data_buffer.DataBuffer] = None,
-            in_lcd: Optional[lcd.AnyLCD] = None
+            in_buffer: Optional[data_buffer.DataBuffer] = None,
+            in_lcd: Optional[lcd.AsyncLCD] = None
         ):
         """Instantiate the class."""
 
-        self.btn = btn if btn else pin_manager.PinManager()
-        self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
-        self.lcd = in_lcd if in_lcd else lcd.FakeLCD()
+        self.data_buffer = in_buffer if in_buffer else data_buffer.DataBuffer()
+        self.lcd = in_lcd if in_lcd else lcd.AsyncLCD()
         self.pio_mach = rp2.StateMachine(
             0, gb_link_pio, 
             in_base=Pin(pinn.GB_IN),
@@ -141,8 +137,7 @@ class GBLink:
         self.pio_enabled_led.on()
         self.initialize_emu_printer()
         if not keep_message:
-            self.lcd.clear()
-            self.lcd.print("Ready")
+            self.lcd.queue_message('Ready')
         self.pio_mach.active(1)
         self.pio_mach.put(0)
         self.last_packet_time = utime.ticks_ms()
@@ -303,7 +298,6 @@ class GBLink:
         )
 
         if self.packet.command == COMMAND_INIT:
-            # self.initialize_emu_printer()
             pass
 
         elif self.packet.command == COMMAND_DATA:
@@ -315,19 +309,20 @@ class GBLink:
                 cmp = bool(self.packet.compression_flag)
                 self.data_buffer.gb_compression_flag[pck] = cmp
                 self.printer_status = PRINTER_READY_TO_PRINT
+                pck = self.data_buffer.num_packets
+                self.lcd.queue_message(f"Got {pck:02} packets")
 
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = PRINTER_PRINTING
             pck = self.data_buffer.num_packets
-            self.lcd.clear()
-            self.lcd.print(f"Got {pck:02} packets")
+            self.lcd.queue_message('Fake printing...')
             if (self.packet.data[1] % 16) == 0:
                 print('This is not the end of a print!')
                 self.end_of_print_data = False
             else:
                 print('Will be end of print!')
                 self.end_of_print_data = True
-            self.fake_print_ticks = 10
+            self.fake_print_ticks = 100
 
         elif self.packet.command == COMMAND_BREAK:
             self.initialize_emu_printer()

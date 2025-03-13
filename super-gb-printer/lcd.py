@@ -71,9 +71,9 @@ class AsyncLCD():
             self.is_real_lcd = False
         self.lcd.clear()
 
-        self.queue = ThreadSafeQueue(8)
+        self._queue = ThreadSafeQueue(8)
     
-    def lcd_title_screen(self) -> None:
+    def display_title_screen(self) -> None:
         if self.is_real_lcd:
             self.lcd.clear()
             self.lcd.print(chr(0) + chr(1) + ' SUPER')
@@ -82,12 +82,26 @@ class AsyncLCD():
         else:
             print('<Insert title screen here>')
     
-    def send_message(self, message: str) -> None:
-        self.queue.put_sync(message)
+    def queue_message(self, message: str) -> None:
+        self._queue.put_sync(message)
 
     async def message_loop(self) -> None:
-        async for msg in self.queue:
+        async for msg in self._queue:
             self.lcd.clear()
             self.lcd.print(msg)
-            await asyncio.sleep(.5)
+            await asyncio.sleep(1)
 
+    def begin(self):
+        self.lcd.begin()
+
+    def clear(self):
+        self.lcd.clear()
+
+    def print(self, text: str):
+       self.lcd.print(text)
+
+    def set_cursor(self, *args, **kwargs):
+        self.lcd.set_cursor(*args, **kwargs)
+
+    def create_char(self, *args, **kwargs):
+        self.lcd.create_char(*args, **kwargs)
