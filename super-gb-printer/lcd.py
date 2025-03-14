@@ -71,7 +71,7 @@ class AsyncLCD():
             self.is_real_lcd = False
         self.lcd.clear()
 
-        self._queue = ThreadSafeQueue(8)
+        self._queue = ThreadSafeQueue(68)
     
     def display_title_screen(self) -> None:
         if self.is_real_lcd:
@@ -89,7 +89,7 @@ class AsyncLCD():
         async for msg in self._queue:
             self.lcd.clear()
             self.lcd.print(msg)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0)
 
     def begin(self):
         self.lcd.begin()

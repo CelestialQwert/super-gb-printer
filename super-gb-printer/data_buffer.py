@@ -5,11 +5,13 @@ GB packets, and graphics data to be sent to the the POS printer. It also
 includes methods for manipulating data between different buffers.
 """
 
+import asyncio
 import rp2
 from micropython import const
 from typing import Optional
 from ulab import numpy as np
 
+import check_threadsafeflag
 import lcd
 
 # the important nubmers that set how big the buffers are
@@ -63,19 +65,19 @@ class DataBuffer():
     includes methods for manipulating data between different buffers.
     """
    
-    def __init__(self, in_lcd: Optional[lcd.AnyLCD] = None) -> None:
+    def __init__(self, in_lcd: Optional[lcd.AsyncLCD] = None) -> None:
         """Instantiate the class.
         
         Args:
             lcd: LCD instance for an optional attached LCD screen
         """
 
-        self.lcd = in_lcd if in_lcd else lcd.FakeLCD()
+        self.lcd = in_lcd if in_lcd else lcd.AsyncLCD()
 
         self.gb_buffer = np.zeros(GB_DATA_BUFFER_DIMS, dtype=np.uint8)
         self.decomp_buffer = np.zeros(PACKET_SIZE, dtype=np.uint8)
-        self.num_converted_packets = 0
-        self.num_packets = 0
+        self.received_packets = 0
+        self.converted_packets = 0
         self.current_page = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.data_length = [0] * NUM_PACKETS
@@ -85,6 +87,8 @@ class DataBuffer():
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
         ]
+        self.data_ready_to_convert = check_threadsafeflag.CheckableThreadSafeFlag()
+        self.print_complete = check_threadsafeflag.CheckableThreadSafeFlag()
 
         self.dma = rp2.DMA()
         self.dma_ctrl = self.dma.pack_ctrl()
@@ -92,7 +96,7 @@ class DataBuffer():
     def clear_packets(self) -> None:
         """Reset GB packets to prepare for next print."""
 
-        self.num_packets = 0
+        self.received_packets = 0
         self.current_page = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.data_length = [0] * NUM_PACKETS
@@ -107,16 +111,17 @@ class DataBuffer():
             packet: The incoming GBPacket 
         """
 
-        if self.num_packets == GB_DATA_BUFFER_DIMS:
+        if self.received_packets == GB_DATA_BUFFER_DIMS:
             raise ValueError('GB packet buffer is full!')
-        self.dma_copy_packet(packet.data, self.num_packets)
-        self.gb_compression_flag[self.num_packets] = bool(packet.compression_flag)
-        self.data_length[self.num_packets] = packet.data_length
-        self.num_packets += 1
-        print(f"Received new packet, I have {self.num_packets}")
+        packet_idx = self.received_packets
+        self.dma_copy_packet(packet.data, packet_idx)
+        self.gb_compression_flag[packet_idx] = bool(packet.compression_flag)
+        self.data_length[packet_idx] = packet.data_length
+        self.received_packets += 1
+        print(f"Received new packet, I have {self.received_packets}")
     
     def dma_copy_packet(self, packet: bytearray, idx: int) -> None:
-        """Copy data packet data to GB buffer using DMA.
+        """Copy data from a DATA packet to GB buffer using DMA.
 
         Args:
             packet: The bytearray from a GBPacket
@@ -126,28 +131,38 @@ class DataBuffer():
         self.dma.config(
             read = packet,
             write = self.gb_buffer[idx,:],
-            count = len(packet) // 4,
+            count = len(packet) // 4, # DMA copies in blcks of 4 bytes
             ctrl = self.dma_ctrl,
             trigger = True
         )
-        
-    def convert_page_of_packets(self, page: int) -> int:
-        """Converts one page (18 packets) of data.
-        
-        Args:
-            page: Naturally, the page to convert
-        
-        Returns:
-            Number of packets converted
-        """
 
-        self.current_page = page + 1
-        p_low = page*18
-        p_hi = min((page+1)*18, self.num_packets)
-        self.convert_packet_range(p_low, p_hi)
-        return p_hi - p_low
-        
-    def convert_packet_range(self, start: int, end: int) -> None:
+    def check_buffer_ready_to_print(self) -> bool:
+        """Check if the buffer has 18 or more unprinted packets."""
+
+        return self.received_packets - self.converted_packets >= 18
+    
+    async def convert_loop(self) -> None:
+        while True:
+            await self.data_ready_to_convert.wait()
+            await self.convert_page_of_packets()
+
+    # def sync_convert_loop(self) -> None:
+    #     while True:
+    #         if self.data_ready_to_convert.check():
+    #             self.convert_page_of_packets()
+    #             self.data_ready_to_convert.clear()
+    
+    async def convert_page_of_packets(self) -> None:
+        """Converts the next page of (or all remaining) unprinted packets."""
+
+        start = self.converted_packets
+        end = min(self.received_packets, self.converted_packets + 18)
+        await self.convert_packet_range(start, end)
+        self.converted_packets += end - start
+        self.print_complete.set()
+        print('setting complete print')
+                
+    async def convert_packet_range(self, start: int, end: int) -> None:
         """Converts a range of packets from GB tile to POS graphics format.
         
         Used by the above methods that specify what that range is.
@@ -160,16 +175,10 @@ class DataBuffer():
                 Python indexing 
         """
 
-        self.lcd.clear()
-        self.lcd.print("Converting")
-        if self.num_pages > 1:
-            self.lcd.set_cursor(0, 1)
-            self.lcd.print(f"Page {self.current_page}/{self.num_pages}")
         for pos_idx, gb_idx in enumerate(range(start, end)):
-            self.lcd.set_cursor(11, 0)
-            self.lcd.print(f"{gb_idx}")
-            self.convert_one_packet(gb_idx, pos_idx)
-        self.num_converted_packets = end - start
+            self.lcd.queue_message(f'Processing {gb_idx}')
+            await asyncio.sleep(0)
+            self.convert_one_packet(gb_idx % NUM_PACKETS, pos_idx)
     
     def convert_one_packet(self, gb_idx: int, pos_idx: int = -1) -> None:
         """Converts one packet from GB tile to POS graphics format.
@@ -178,9 +187,8 @@ class DataBuffer():
             gb_idx: 
                 Index of packet in the GB tile buffer to be converted
             pos_idx: 
-                Index of data in the POS graphics data buffer. May be 
-                different than gb_idx since the buffers are different sizes
-                and data is generally converted one page at a time.
+                Index of data in the POS graphics data buffer. gb_idx
+                may differ from this if multiple pages are being printed.
         """
 
         if self.gb_compression_flag[gb_idx]:
@@ -235,7 +243,7 @@ class DataBuffer():
     def decompress_packet_data(
             self, comp_packet: np.ndarray, data_length: int
         ) -> None:
-        """The decompression algorithm.
+        """Decompresses packet data into the decompression buffer.
         
         Args:
             comp_packet: The data to be decompressed
@@ -267,6 +275,6 @@ class DataBuffer():
     @property
     def num_pages(self):
         """Get the number of pages (18 packets) received."""
-        return ((self.num_packets - 1) // 18) + 1
+        return ((self.received_packets - 1) // 18) + 1
     
 

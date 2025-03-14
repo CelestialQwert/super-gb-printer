@@ -3,6 +3,7 @@
 Contains methods that handle the connection to the Game Boy.
 """
 
+import asyncio
 import rp2
 import utime
 from machine import Pin
@@ -10,9 +11,10 @@ from micropython import const
 from typing import Optional
 # from ulab import numpy as np
 
+import check_threadsafeflag
 import data_buffer
-import pinout as pinn
 import lcd
+import pinout as pinn
 import utimeit
 
 # Add type hints for the rp2.PIO Instructions
@@ -21,7 +23,6 @@ import utimeit
 from typing_extensions import TYPE_CHECKING # type: ignore
 if TYPE_CHECKING:
     from rp2.asm_pio import *
-
 
 # states for handling the incoming GB packet
 STATE_IDLE = const(0)
@@ -103,7 +104,8 @@ class GBLink:
         self.end_of_print_data = False
         self.last_packet_time = utime.ticks_ms()
         self.fake_print_ticks = 0
-        self.send_early_status_byte = True
+        
+        self.fake_printing = False
 
     def startup(self) -> None:
         """Initialize the GB link."""
@@ -153,14 +155,14 @@ class GBLink:
             self.shutdown_pio_mach()
             self.startup_pio_mach()
         
-    def initialize_emu_printer(self):
+    def initialize_emu_printer(self) -> None:
         """Resets states/buffers related to the emulated printer."""
 
         self.packet_state = STATE_IDLE
         self.printer_status = PRINTER_IDLE
         self.data_buffer.clear_packets()
     
-    def check_print_ready(self) -> bool:
+    def check_data_ready_to_convert(self) -> bool:
         """Checks if a print is ready to start.
 
         Check succeeds if a print command packet has been received from the
@@ -238,36 +240,30 @@ class GBLink:
                 self.packet_state = STATE_CHECKSUM
                 self.remaining_bytes = 2
         
-        # the response bytes start getting sent in this part of the
-        # incoming packet
         elif self.packet_state == STATE_CHECKSUM:
             self.remaining_bytes -= 1
             if self.remaining_bytes == 1:
                 self.packet.checksum = self.rx_byte
-                # can always send this here, desired if status byte is sent
-                # early and ignored by Game Boy if sent on time
-                self.tx_byte = 0x81 # first response byte
+                # This response byte will get queued after the next byte
+                # which is already coming into the PIO due to the 50 us delay
+                # above. It gets sent to the Game Boy alongside the first 
+                # response byte.
+                self.tx_byte = 0x81
             else:
                 self.packet.checksum += self.rx_byte * 256
                 self.packet_state = STATE_RESPONSE_READY
-                # where which byte gets sent matters
-                if self.send_early_status_byte:
-                    self.tx_byte = self.printer_status
-                else:
-                    self.tx_byte = 0x81
-                # self.tx_byte = 0x81
-        
+                # Similar thing here, this will get delayed by one byte then
+                # sent to the Game Boy alongside the final response byte
+                self.tx_byte = self.printer_status
+ 
         elif self.packet_state == STATE_RESPONSE_READY:
             self.packet_state = STATE_RESPONSE_PARTIAL
-            # can always send this here, desired if status byte is sent
-            # on time and ignored by Game Boy if sent early
-            self.tx_byte = self.printer_status
+            # First response byte (0x81) was sent here
 
         elif self.packet_state == STATE_RESPONSE_PARTIAL:
             self.packet_state = STATE_IDLE
             self.complete_packet = True
-            # print(self.rx_byte, utime.ticks_us() - self.last_byte_time)
-            # self.last_byte_time = utime.ticks_us()
+            # Second response byte (printer status) was sent here
 
         self.pio_mach.put(self.tx_byte)
     
@@ -275,7 +271,7 @@ class GBLink:
         """Check if there's a complete packet and handle it.
         
         Each command does the following things:
-        INIT - 
+        INIT - Nothing
         DATA - Copies data from GBPacket to the data buffer
         PRINT - Sets flag that print is ready and saves margin info. Starts
             off a counter to make the Game Boy think a print is actually
@@ -304,34 +300,44 @@ class GBLink:
             if self.packet.data_length == 0:
                 print('Received stop data packet')
             else:
+                pck = self.data_buffer.received_packets
                 self.data_buffer.copy_new_packet(self.packet)
-                pck = self.data_buffer.num_packets
                 cmp = bool(self.packet.compression_flag)
                 self.data_buffer.gb_compression_flag[pck] = cmp
                 self.printer_status = PRINTER_READY_TO_PRINT
-                pck = self.data_buffer.num_packets
-                self.lcd.queue_message(f"Got {pck:02} packets")
+                self.lcd.queue_message(f"Got {pck+1:02} packets")
 
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = PRINTER_PRINTING
-            pck = self.data_buffer.num_packets
-            self.lcd.queue_message('Fake printing...')
-            if (self.packet.data[1] % 16) == 0:
-                print('This is not the end of a print!')
-                self.end_of_print_data = False
+            if (
+                self.packet.data[1] % 16 # there's a bottom margin
+                or self.data_buffer.check_buffer_ready_to_print()
+            ):
+                self.lcd.queue_message('Real print ready!')
+                self.data_buffer.data_ready_to_convert.set()
+                self.fake_print_ticks = 1
             else:
-                print('Will be end of print!')
-                self.end_of_print_data = True
-            self.fake_print_ticks = 100
+                self.lcd.queue_message('Fake printing...')
+                self.fake_printing = True
+                print('This is not the end of a print!')
+                self.fake_print_ticks = 10
 
         elif self.packet.command == COMMAND_BREAK:
             self.initialize_emu_printer()
             
         elif self.packet.command == COMMAND_STATUS:
             if self.printer_status == PRINTER_PRINTING:
-                self.fake_print_ticks -= 1
-                if self.fake_print_ticks == 0:
-                    self.printer_status = PRINTER_COMPLETE
+                if (
+                    self.fake_printing
+                    or self.data_buffer.print_complete.check()
+                ):
+                    self.fake_print_ticks -= 1
+                    if self.fake_print_ticks <= 0:
+                        self.printer_status = PRINTER_COMPLETE
+                        if self.fake_printing:
+                            self.lcd.queue_message('Fake print done')
+                        self.fake_printing = False
+                        self.data_buffer.print_complete.clear()
             elif self.printer_status == PRINTER_COMPLETE:
                 self.printer_status = PRINTER_IDLE
                     

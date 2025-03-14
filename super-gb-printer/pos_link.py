@@ -278,7 +278,7 @@ class POSLink:
     def print_download_graphics_data(
             self, zoom_x: int = 1, zoom_y: int = -1, keycode: str = 'GB'
         ):
-        """Send the header portion of the send download graphics data command.
+        """Send the print graphics data command.
         
         Args:
             zoom_x: Horizontal zoom of data, 1 or 2
