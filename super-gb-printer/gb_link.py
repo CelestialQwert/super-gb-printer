@@ -304,8 +304,7 @@ class GBLink:
                 self.data_buffer.copy_new_packet(self.packet)
                 cmp = bool(self.packet.compression_flag)
                 self.data_buffer.gb_compression_flag[pck] = cmp
-                self.printer_status = PRINTER_READY_TO_PRINT
-                self.lcd.queue_message(f"Got {pck+1:02} packets")
+                self.printer_status = PRINTER_READY_TO_PRINT       
 
         elif self.packet.command == COMMAND_PRINT:
             self.printer_status = PRINTER_PRINTING

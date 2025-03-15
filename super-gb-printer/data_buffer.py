@@ -118,7 +118,7 @@ class DataBuffer():
         self.gb_compression_flag[packet_idx] = bool(packet.compression_flag)
         self.data_length[packet_idx] = packet.data_length
         self.received_packets += 1
-        print(f"Received new packet, I have {self.received_packets}")
+        self.lcd.queue_message(f"Got {self.received_packets} packets")
     
     def dma_copy_packet(self, packet: bytearray, idx: int) -> None:
         """Copy data from a DATA packet to GB buffer using DMA.
