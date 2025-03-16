@@ -11,7 +11,7 @@ from micropython import const
 from typing import Optional
 from ulab import numpy as np
 
-import check_threadsafeflag
+import query_flag
 import lcd
 
 # the important nubmers that set how big the buffers are
@@ -87,8 +87,9 @@ class DataBuffer():
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
         ]
-        self.data_ready_to_convert = check_threadsafeflag.CheckableThreadSafeFlag()
-        self.print_complete = check_threadsafeflag.CheckableThreadSafeFlag()
+        self.ready_to_convert = query_flag.QueryThreadSafeFlag()
+        self.ready_to_print = query_flag.QueryThreadSafeFlag()
+        self.print_complete = query_flag.QueryThreadSafeFlag()
 
         self.dma = rp2.DMA()
         self.dma_ctrl = self.dma.pack_ctrl()
@@ -143,14 +144,14 @@ class DataBuffer():
     
     async def convert_loop(self) -> None:
         while True:
-            await self.data_ready_to_convert.wait()
+            await self.ready_to_convert.wait()
             await self.convert_page_of_packets()
 
     # def sync_convert_loop(self) -> None:
     #     while True:
-    #         if self.data_ready_to_convert.check():
+    #         if self.ready_to_convert.check():
     #             self.convert_page_of_packets()
-    #             self.data_ready_to_convert.clear()
+    #             self.ready_to_convert.clear()
     
     async def convert_page_of_packets(self) -> None:
         """Converts the next page of (or all remaining) unprinted packets."""

@@ -1,7 +1,7 @@
 import asyncio
 import select
 
-class CheckableThreadSafeFlag(asyncio.ThreadSafeFlag):
+class QueryThreadSafeFlag(asyncio.ThreadSafeFlag):
 
     def __init__(self):
         asyncio.ThreadSafeFlag.__init__(self)

@@ -11,7 +11,7 @@ from micropython import const
 from typing import Optional
 # from ulab import numpy as np
 
-import check_threadsafeflag
+import query_flag
 import data_buffer
 import lcd
 import pinout as pinn
@@ -141,7 +141,7 @@ class GBLink:
         if not keep_message:
             self.lcd.queue_message('Ready')
         self.pio_mach.active(1)
-        self.pio_mach.put(0)
+        # self.pio_mach.put(0)
         self.last_packet_time = utime.ticks_ms()
     
     def check_timeout(self) -> None:
@@ -162,7 +162,7 @@ class GBLink:
         self.printer_status = PRINTER_IDLE
         self.data_buffer.clear_packets()
     
-    def check_data_ready_to_convert(self) -> bool:
+    def check_ready_to_convert(self) -> bool:
         """Checks if a print is ready to start.
 
         Check succeeds if a print command packet has been received from the
@@ -271,7 +271,7 @@ class GBLink:
         """Check if there's a complete packet and handle it.
         
         Each command does the following things:
-        INIT - Nothing
+        INIT - Initializes printer
         DATA - Copies data from GBPacket to the data buffer
         PRINT - Sets flag that print is ready and saves margin info. Starts
             off a counter to make the Game Boy think a print is actually
@@ -286,15 +286,15 @@ class GBLink:
         if not self.complete_packet:
             return
      
-        print(
-            f'Packet type: {self.packet.command}, '
-            f'Printer status: {self.printer_status}, '
-            f'Print ticks: {self.fake_print_ticks}, ' 
-            f'Packet time: {utime.ticks_ms()}'
-        )
+        # print(
+        #     f'Packet type: {self.packet.command}, '
+        #     f'Printer status: {self.printer_status}, '
+        #     f'Print ticks: {self.fake_print_ticks}, ' 
+        #     f'Packet time: {utime.ticks_ms()}'
+        # )
 
         if self.packet.command == COMMAND_INIT:
-            pass
+            self.initialize_emu_printer()
 
         elif self.packet.command == COMMAND_DATA:
             if self.packet.data_length == 0:
@@ -307,19 +307,20 @@ class GBLink:
                 self.printer_status = PRINTER_READY_TO_PRINT       
 
         elif self.packet.command == COMMAND_PRINT:
-            self.printer_status = PRINTER_PRINTING
-            if (
-                self.packet.data[1] % 16 # there's a bottom margin
-                or self.data_buffer.check_buffer_ready_to_print()
-            ):
-                self.lcd.queue_message('Real print ready!')
-                self.data_buffer.data_ready_to_convert.set()
-                self.fake_print_ticks = 1
-            else:
-                self.lcd.queue_message('Fake printing...')
-                self.fake_printing = True
-                print('This is not the end of a print!')
-                self.fake_print_ticks = 10
+            if self.printer_status == PRINTER_READY_TO_PRINT:
+                self.printer_status = PRINTER_PRINTING
+                if (
+                    self.packet.data[1] % 16 # there's a bottom margin
+                    or self.data_buffer.check_buffer_ready_to_print()
+                ):
+                    self.lcd.queue_message('Real print ready!')
+                    self.data_buffer.ready_to_convert.set()
+                    self.fake_print_ticks = 1
+                else:
+                    self.lcd.queue_message('Fake printing...')
+                    self.fake_printing = True
+                    print('This is not the end of a print!')
+                    self.fake_print_ticks = 10
 
         elif self.packet.command == COMMAND_BREAK:
             self.initialize_emu_printer()
