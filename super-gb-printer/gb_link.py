@@ -11,10 +11,10 @@ from micropython import const
 from typing import Optional
 # from ulab import numpy as np
 
-import query_flag
 import data_buffer
 import lcd
 import pinout as pinn
+import pin_manager
 import utimeit
 
 # Add type hints for the rp2.PIO Instructions
@@ -57,7 +57,7 @@ PRINTER_COMPLETE = const(4)
 def gb_link_pio():
     set(x, 6)             # set loop to run 6 + 1 times
     wait(0, gpio, 2)      # wait for falling edge
-    set(pins, 1)          # byte started, turn on LED
+    # set(pins, 1)          # byte started, turn on LED
     pull(noblock)         # pull value from TX FIFO to OSR
     out(null, 24)         # shift left by 24, keeping 8 bits of desired data
     out(pins, 1)          # out the MSB bit in OSR to GB
@@ -71,7 +71,7 @@ def gb_link_pio():
     in_(pins, 1)          # input last bit from GB
     push(noblock)         # push the received value from ISR to RX FIFO
     irq(rel(0))           # set interrupt
-    set(pins, 0)          # byte complete, turn off LED
+    # set(pins, 0)          # byte complete, turn off LED
 
 class GBLink:
     """Contains methods that handle the connection to the Game Boy."""
@@ -79,20 +79,21 @@ class GBLink:
     def __init__(
             self,
             in_buffer: Optional[data_buffer.DataBuffer] = None,
-            in_lcd: Optional[lcd.AsyncLCD] = None
+            in_lcd: Optional[lcd.AsyncLCD] = None,
+            in_leds: Optional[pin_manager.LEDManager] = None
         ):
         """Instantiate the class."""
 
         self.data_buffer = in_buffer if in_buffer else data_buffer.DataBuffer()
         self.lcd = in_lcd if in_lcd else lcd.AsyncLCD()
+        self.leds = in_leds if in_leds else pin_manager.LEDManager()
         self.pio_mach = rp2.StateMachine(
             0, gb_link_pio, 
             in_base=Pin(pinn.GB_IN),
             out_base=Pin(pinn.GB_OUT),
-            set_base=Pin(pinn.GB_LED_ACTIVITY),
+            # set_base=Pin(pinn.GB_LED_ACTIVITY),
             freq = int(1e6)
         )
-        self.pio_enabled_led = Pin(pinn.GB_PIO_ENABLED, Pin.OUT)
         self.packet_state = STATE_IDLE
         self.remaining_bytes = 0
         self.packet = data_buffer.GBPacket()
@@ -110,7 +111,7 @@ class GBLink:
     def startup(self) -> None:
         """Initialize the GB link."""
 
-        self.pio_enabled_led.off()
+        self.leds.pio_enabled.off()
         # Pin(pinn.GB_LED_ACTIVITY, Pin.OUT).off()
         self.pio_mach.irq(self.gb_interrupt)
         self.shutdown_pio_mach()
@@ -120,9 +121,10 @@ class GBLink:
     def shutdown_pio_mach(self) -> None:
         """Shut down link PIO and clean out FIFOs."""
 
-        print('Shutting down PIO')
+        # print('Shutting down PIO')
         self.pio_mach.active(0)
-        self.pio_enabled_led.off()
+        self.leds.pio_enabled.off()
+        self.leds.gb_activity.off()
         while self.pio_mach.rx_fifo():
             print('Draining RX FIFO')
             _ = self.pio_mach.get()
@@ -134,12 +136,12 @@ class GBLink:
     def startup_pio_mach(self, keep_message: bool = False) -> None:
         """Start up link PIO and add initial status byte 0."""
         
-        print('Starting PIO')
+        #print('Starting PIO')
         self.pio_mach.restart()
-        self.pio_enabled_led.on()
+        self.leds.pio_enabled.on()
         self.initialize_emu_printer()
         if not keep_message:
-            self.lcd.queue_message('Ready')
+            self.lcd.queue_message('Ready', timestamp=True)
         self.pio_mach.active(1)
         # self.pio_mach.put(0)
         self.last_packet_time = utime.ticks_ms()
@@ -285,6 +287,8 @@ class GBLink:
 
         if not self.complete_packet:
             return
+        
+        self.leds.gb_activity.toggle()
      
         # print(
         #     f'Packet type: {self.packet.command}, '
@@ -315,7 +319,7 @@ class GBLink:
                 ):
                     self.lcd.queue_message('Real print ready!')
                     self.data_buffer.ready_to_convert.set()
-                    self.fake_print_ticks = 1
+                    self.fake_print_ticks = 5
                 else:
                     self.lcd.queue_message('Fake printing...')
                     self.fake_printing = True

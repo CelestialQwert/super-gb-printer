@@ -1,28 +1,17 @@
-"""Class PinManager
-
-Handles reading of DIP switches and buttons and the settings they control.
-"""
+"""Classes for handling auxillary things attached to pins on the Pico."""
 
 from machine import Pin
-
-import utimeit
 import pinout as pinn
 
 
-class PinManager():
-    """Class PinManager
+class DIPManager():
+    """Class DIPManager
 
-    Handles reading of DIP switches and buttons and the settings they control.
+    Handles reading of DIP switches and the settings they control.
     """
 
     def __init__(self):
         """Instantiate the class."""
-
-        last_button = pinn.FIRST_BUTTON + pinn.NUM_BUTTONS
-        self.buttons = [
-            Pin(x, Pin.IN, Pin.PULL_DOWN) 
-            for x in range(pinn.FIRST_BUTTON, last_button)
-        ]
 
         last_dip_switch = pinn.FIRST_DIP_SWITCH + pinn.NUM_DIP_SWITCHES
         self.dip_switches = [
@@ -63,14 +52,45 @@ class PinManager():
         
         """
         return self.dip_switches[3].value()
-        
+
+class ButtonManager():
+    """Class ButtonManager
+
+    Handles reading of buttons.
+    """
+    def __init__(self):
+        last_button = pinn.FIRST_BUTTON + pinn.NUM_BUTTONS
+        self.buttons = [
+            Pin(x, Pin.IN, Pin.PULL_DOWN) 
+            for x in range(pinn.FIRST_BUTTON, last_button)
+        ]
+
+
+class LEDManager():
+    """Class LEDManager
+
+    Contains all the LEDs and gives them descriptive names.
+    """
+    def __init__(self):
+        self.pio_enabled = Pin(pinn.GB_PIO_ENABLED, Pin.OUT)
+        self.gb_activity = Pin(pinn.GB_LED_ACTIVITY, Pin.OUT)
+        self.pos_activity = Pin(pinn.POS_TX_ACTIVITY, Pin.OUT)
+        self.leds = [self.pio_enabled, self.gb_activity, self.pos_activity]
+
+    def all_off(self) -> None:
+        """Turn all the LEDs off."""
+
+        for led in self.leds:
+            led.off()
+        self.gb_activity.off()
 
 
 if __name__ == "__main__":
     import utime
-    mgr = PinManager()
+    settings = DIPManager()
+    btn = ButtonManager()
     while True:
-        dips = [x.value() for x in mgr.dip_switches]
-        btns = [x.value() for x in mgr.buttons]
+        dips = [x.value() for x in settings.dip_switches]
+        btns = [x.value() for x in btn.buttons]
         print(f"DIPs: {dips}, Buttons: {btns}")
         utime.sleep(1)

@@ -146,12 +146,6 @@ class DataBuffer():
         while True:
             await self.ready_to_convert.wait()
             await self.convert_page_of_packets()
-
-    # def sync_convert_loop(self) -> None:
-    #     while True:
-    #         if self.ready_to_convert.check():
-    #             self.convert_page_of_packets()
-    #             self.ready_to_convert.clear()
     
     async def convert_page_of_packets(self) -> None:
         """Converts the next page of (or all remaining) unprinted packets."""

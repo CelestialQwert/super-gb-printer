@@ -49,7 +49,8 @@ class POSLink:
             self, 
             buffer: Optional[data_buffer.DataBuffer] = None,
             in_lcd: Optional[lcd.AsyncLCD] = None,
-            in_btn: Optional[pin_manager.PinManager] = None
+            in_sett: Optional[pin_manager.DIPManager] = None,
+            in_leds: Optional[pin_manager.LEDManager] = None
         ) -> None:
         """Instantiate the class.
         
@@ -60,10 +61,10 @@ class POSLink:
 
         self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
         self.lcd = in_lcd if in_lcd else lcd.AsyncLCD()
-        self.btn = in_btn if in_btn else pin_manager.PinManager()
+        self.settings = in_sett if in_sett else pin_manager.DIPManager()
+        self.leds = in_leds if in_leds else pin_manager.LEDManager()
         self.uart = UART(
             0, baudrate=115200, tx=Pin(pinn.POS_TX), rx=Pin(pinn.POS_RX))
-        self.activity_led = Pin(pinn.POS_TX_ACTIVITY, Pin.OUT)
         self.ready_to_print = query_flag.QueryThreadSafeFlag()
         
         self.zoomed_lut = {
@@ -105,7 +106,7 @@ class POSLink:
 
     def init_printer(self) -> None:
         """Send printer init command."""
-        self.activity_led.off()
+        self.leds.pos_activity.off()
         #                      ESC  @
         self.uart.write(bytes([27, 64]))
         wait()
@@ -141,9 +142,9 @@ class POSLink:
     async def pos_loop(self) -> None:
         while True:
             await self.data_buffer.ready_to_print.wait()
-            if self.btn.no_scale:
+            if self.settings.no_scale:
                 zoom = 1
-            elif self.btn.scale_2x:
+            elif self.settings.scale_2x:
                 zoom = 2
             else:
                 zoom = 3
@@ -153,7 +154,7 @@ class POSLink:
             self.lcd.queue_message("Print complete!")
             await asyncio.sleep(0)
             utime.sleep(.5)            
-            if self.btn.add_bottom_margin:
+            if self.settings.add_bottom_margin:
                 self.cut(feed_height=184)
             else:
                 self.cut()
@@ -206,22 +207,14 @@ class POSLink:
         phys_zoom_x = 1 if zoom_x < 3 else zoom_x
         phys_zoom_y = 1 if zoom_y < 3 else zoom_y
 
-        # POS zoom - tells the printer to do the scaling when zoom = 2
-        pos_zoom_x = 2 if zoom_x == 2 else 1
-        pos_zoom_y = 2 if zoom_y == 2 else 1
-
         # send header
         self.send_download_graphics_data_header(
             x * phys_zoom_x, y * phys_zoom_y, keycode=keycode
         )
-
-        # Tell everyone we're about to start sending data
-        print('Sending download data...')
           
         # start sending data
         tile_row_buffer = np.zeros(x * phys_zoom_x, dtype=np.uint8)
         for i, tone_payload in enumerate(full_payload):
-            print(f"sending tone {i}")
             self.send_tone_number(i)
             for row in range(y):
                 # update the LCD with each packet (16 px tall) processed
@@ -239,12 +232,12 @@ class POSLink:
                 else:
                     # if not zoomed, just send the row data
                     tile_row_buffer = tone_payload[row,:]
-                self.activity_led.on()
+                self.leds.pos_activity.on()
                 for _ in range(phys_zoom_y):
                     # need to send y times to create y-zoom
                     self.uart.write(tile_row_buffer.tobytes())
                     wait()
-                self.activity_led.off()
+                self.leds.pos_activity.off()
         print('done')
 
     def send_download_graphics_data_header(
@@ -292,7 +285,7 @@ class POSLink:
         elif tone in [49, 50, 51, 52]:
             pass
         else:
-            raise ValueError(f'Invalid tone value {tone}, must be 0-3 or 49-52')
+            raise ValueError(f'Bad tone value {tone}, must be 0-3 or 49-52')
         self.uart.write(bytes([tone]))
         wait()
     

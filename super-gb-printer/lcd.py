@@ -1,4 +1,5 @@
-import asyncio 
+import asyncio
+import utime
 from machine import I2C
 
 from lcd_i2c import LCD
@@ -48,7 +49,7 @@ class AsyncLCD():
     
     def queue_message(
             self, message: str, col: int = 0, row: int = 0, 
-            erase: bool = True
+            erase: bool = True, timestamp: bool = False
         ) -> None:
         """Add a message to the queue to be displayed on the LCD screen.
         
@@ -57,17 +58,19 @@ class AsyncLCD():
             col: Starting column for the message (0-15)
             row: Row for the message (0 or 1)
             erase: Erase the display before printing message
+            timestamp: Add a timestamp to the message on stdout
         """
-        self._queue.put_sync((message, col, row, erase))
+        self._queue.put_sync((message, col, row, erase, timestamp))
 
     async def message_loop(self) -> None:
         """Displays messages on the LCD as they come in."""
-        async for message, col, row, erase in self._queue:
+        async for message, col, row, erase, timestamp in self._queue:
+            ts = utime.ticks_ms() if timestamp else ''
             if erase:
                 self.lcd.clear()
-                print(f"For LCD: {message}")
+                print(f"For LCD: {message} {ts}")
             else:
-                print(f"For LCD (no erase): {message}")
+                print(f"For LCD (no erase): {message} {ts}")
             if row or col:
                 self.lcd.set_cursor(row, col)
             self.lcd.print(message)
