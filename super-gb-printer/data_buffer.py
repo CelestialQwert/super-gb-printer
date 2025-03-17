@@ -78,7 +78,7 @@ class DataBuffer():
         self.decomp_buffer = np.zeros(PACKET_SIZE, dtype=np.uint8)
         self.received_packets = 0
         self.converted_packets = 0
-        self.current_page = 0
+        self.ready_to_print_packets = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.data_length = [0] * NUM_PACKETS
         self.pos_buffer = [
@@ -98,7 +98,7 @@ class DataBuffer():
         """Reset GB packets to prepare for next print."""
 
         self.received_packets = 0
-        self.current_page = 0
+        self.converted_packets = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.data_length = [0] * NUM_PACKETS
     
@@ -159,9 +159,9 @@ class DataBuffer():
         start = self.converted_packets
         end = min(self.received_packets, self.converted_packets + 18)
         await self.convert_packet_range(start, end)
-        self.converted_packets += end - start
-        self.print_complete.set()
-        print('setting complete print')
+        self.ready_to_print_packets = end - start
+        self.converted_packets += self.ready_to_print_packets
+        self.ready_to_print.set()
                 
     async def convert_packet_range(self, start: int, end: int) -> None:
         """Converts a range of packets from GB tile to POS graphics format.

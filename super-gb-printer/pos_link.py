@@ -12,6 +12,7 @@ converted to the printer's graphics format at 3x zoom and multi-tone
 (16 colors, but only 4 get used). 
 """
 
+import asyncio
 import utime
 from machine import UART, Pin
 from micropython import const
@@ -20,8 +21,9 @@ from ulab import numpy as np
 
 import data_buffer
 import lcd
-import lcd_i2c
+import pin_manager
 import pinout as pinn
+import query_flag
 import utimeit
 
 ROWS_PER_PACKET = const(16)
@@ -46,7 +48,8 @@ class POSLink:
     def __init__(
             self, 
             buffer: Optional[data_buffer.DataBuffer] = None,
-            in_lcd: Optional[lcd.AnyLCD] = None,
+            in_lcd: Optional[lcd.AsyncLCD] = None,
+            in_btn: Optional[pin_manager.PinManager] = None
         ) -> None:
         """Instantiate the class.
         
@@ -56,16 +59,21 @@ class POSLink:
         """
 
         self.data_buffer = buffer if buffer else data_buffer.DataBuffer()
-        self.lcd = in_lcd if in_lcd else lcd.FakeLCD()
+        self.lcd = in_lcd if in_lcd else lcd.AsyncLCD()
+        self.btn = in_btn if in_btn else pin_manager.PinManager()
         self.uart = UART(
             0, baudrate=115200, tx=Pin(pinn.POS_TX), rx=Pin(pinn.POS_RX))
         self.activity_led = Pin(pinn.POS_TX_ACTIVITY, Pin.OUT)
+        self.ready_to_print = query_flag.QueryThreadSafeFlag()
+        
         self.zoomed_lut = {
             2: np.zeros((256, 2), dtype=np.uint8),
             3: np.zeros((256, 3), dtype=np.uint8),
             4: np.zeros((256, 4), dtype=np.uint8),
         }
         self.make_lut()
+
+
 
     def make_lut(self) -> None:
         """Creates look-up table for stretching out bits in a byte.
@@ -129,20 +137,40 @@ class POSLink:
         #                      GS  (   L   pL  pH   m  fn
         self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
         wait()
-    
+
+    async def pos_loop(self) -> None:
+        while True:
+            await self.data_buffer.ready_to_print.wait()
+            if self.btn.no_scale:
+                zoom = 1
+            elif self.btn.scale_2x:
+                zoom = 2
+            else:
+                zoom = 3
+            await self.send_ready_data(zoom)
+            self.data_buffer.print_complete.set()
+            self.print_download_graphics_data(zoom)
+            self.lcd.queue_message("Print complete!")
+            await asyncio.sleep(0)
+            utime.sleep(.5)            
+            if self.btn.add_bottom_margin:
+                self.cut(feed_height=184)
+            else:
+                self.cut()
+        
     @utimeit.timeit
-    def send_data_buffer_to_download(self, zoom: int = 3):
-        """Send portion of data buffer containing data to printer.
+    async def send_ready_data(self, zoom: int = 3):
+        """Send ready data from data buffer to printer.
 
         Args:
             zoom: Zoom level of the image
         """
 
-        slice_h = self.data_buffer.num_converted_packets * ROWS_PER_PACKET
+        slice_h = self.data_buffer.ready_to_print_packets * ROWS_PER_PACKET
         buffer_slice = [x[:slice_h,:] for x in self.data_buffer.pos_buffer]
-        self.send_download_graphics_data(buffer_slice, zoom)
+        await self.send_download_graphics_data(buffer_slice, zoom)
     
-    def send_download_graphics_data(
+    async def send_download_graphics_data(
         self, full_payload: list[np.ndarray], zoom_x: int = 1, 
         zoom_y: int = -1, keycode: str = 'GB', 
     ):
@@ -189,14 +217,7 @@ class POSLink:
 
         # Tell everyone we're about to start sending data
         print('Sending download data...')
-        self.lcd.clear()
-        self.lcd.print('Sending')
-        if self.data_buffer.num_pages > 1:
-            self.lcd.set_cursor(0, 1)
-            cp = self.data_buffer.current_page
-            nump = self.data_buffer.num_pages
-            self.lcd.print(f"Page {cp}/{nump}")
-        
+          
         # start sending data
         tile_row_buffer = np.zeros(x * phys_zoom_x, dtype=np.uint8)
         for i, tone_payload in enumerate(full_payload):
@@ -207,8 +228,8 @@ class POSLink:
                 if not row % 16:
                     n = (row + i * y) // 16
                     d = y // 4
-                    self.lcd.set_cursor(8, 0)
-                    self.lcd.print(f"{n:02}/{d:02}")
+                    self.lcd.queue_message(f'Sending {n:02}/{d:02}')
+                    await asyncio.sleep(0)
                 if phys_zoom_x >= 3:
                     for px in range(x):
                         # stretch each byte by amout of x-zoom

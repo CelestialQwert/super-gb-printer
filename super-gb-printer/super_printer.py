@@ -36,7 +36,7 @@ class SuperPrinter():
 
         self.data_buffer = data_buffer.DataBuffer(self.lcd)
         self.gb_link = gb_link.GBLink(self.data_buffer, self.lcd)
-        self.pos_link = pos_link.POSLink(self.data_buffer, self.lcd)
+        self.pos_link = pos_link.POSLink(self.data_buffer, self.lcd, self.btn)
     
     def core_2(self):
         asyncio.run(self.async_core_2())
@@ -44,7 +44,8 @@ class SuperPrinter():
     async def async_core_2(self):
         message_task = self.lcd.message_loop()
         convert_task = self.data_buffer.convert_loop()
-        await asyncio.gather(message_task, convert_task)
+        print_task = self.pos_link.pos_loop()
+        await asyncio.gather(message_task, convert_task, print_task)
     
     def main_thread(self):
         self.gb_link.startup()
@@ -86,32 +87,7 @@ class SuperPrinter():
         If there is more than 18 packets of data, it is processed, sent, and
         printed in "pages" of 18 packets, then cut at the end.
         """
-
-        self.gb_link.shutdown_pio_mach()
-        print('Commencing print')
-        self.pos_link.set_justification(1)
-        if self.btn.no_scale:
-            zoom = 1
-        elif self.btn.scale_2x:
-            zoom = 2
-        else:
-            zoom = 3
-        for p in range(self.data_buffer.num_pages):
-            print(f'Sending page {p+1} of {self.data_buffer.num_pages}')
-            num_pkts = self.data_buffer.convert_page_of_packets()
-            self.pos_link.send_data_buffer_to_download(zoom)
-            self.lcd.set_cursor(0, 0)
-            self.lcd.print("Printing page...")
-            self.pos_link.print_download_graphics_data(zoom)
-            # utime.sleep(.15 * num_pkts)
-        self.lcd.clear()
-        self.lcd.print("Print complete!")
-        utime.sleep(.5)
-        if self.btn.add_bottom_margin:
-            self.pos_link.cut(feed_height=184)
-        else:
-            self.pos_link.cut()
-        self.gb_link.startup_pio_mach(keep_message=True)
+        pass
 
 
 if __name__ == "__main__":
