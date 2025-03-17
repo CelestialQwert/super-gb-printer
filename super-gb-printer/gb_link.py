@@ -304,26 +304,19 @@ class GBLink:
             if self.packet.data_length == 0:
                 print('Received stop data packet')
             else:
-                pck = self.data_buffer.received_packets
-                self.data_buffer.copy_new_packet(self.packet)
-                cmp = bool(self.packet.compression_flag)
-                self.data_buffer.gb_compression_flag[pck] = cmp
+                self.data_buffer.copy_data_packet(self.packet)
                 self.printer_status = PRINTER_READY_TO_PRINT       
 
         elif self.packet.command == COMMAND_PRINT:
             if self.printer_status == PRINTER_READY_TO_PRINT:
                 self.printer_status = PRINTER_PRINTING
-                if (
-                    self.packet.data[1] % 16 # there's a bottom margin
-                    or self.data_buffer.check_buffer_ready_to_print()
-                ):
+                will_print = self.data_buffer.parse_print_packet(self.packet)
+                if will_print:
                     self.lcd.queue_message('Real print ready!')
-                    self.data_buffer.ready_to_convert.set()
                     self.fake_print_ticks = 5
                 else:
                     self.lcd.queue_message('Fake printing...')
                     self.fake_printing = True
-                    print('This is not the end of a print!')
                     self.fake_print_ticks = 10
 
         elif self.packet.command == COMMAND_BREAK:

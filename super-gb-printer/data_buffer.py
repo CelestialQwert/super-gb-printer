@@ -81,6 +81,7 @@ class DataBuffer():
         self.ready_to_print_packets = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.data_length = [0] * NUM_PACKETS
+        self.end_of_print = True
         self.pos_buffer = [
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
@@ -102,7 +103,7 @@ class DataBuffer():
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.data_length = [0] * NUM_PACKETS
     
-    def copy_new_packet(self, packet: GBPacket) -> None:
+    def copy_data_packet(self, packet: GBPacket) -> None:
         """Copies needed data from GBPacket to the proper buffers.
         
         Grabs the compressions flag, data length (for compressed packets)
@@ -136,6 +137,35 @@ class DataBuffer():
             ctrl = self.dma_ctrl,
             trigger = True
         )
+
+    def parse_print_packet(self, packet: GBPacket) -> bool:
+        """Parse the information in a print packet.
+
+        Byte 0 - Number of copies to print 
+        Byte 1 - Margins: high nibble is top, low nibble is bottom in units 
+            of line feeds
+        Byte 2 - Palette default E4 (ignored (until something uses it))
+        Byte 3 - Print density adjustment, default 40 (ignored)
+        
+        Args:
+            packet: The incoming GBPacket
+
+        Returns:
+            A bool which tells whether the print will occur or not. (If not,
+            the GB link should fake a print for a bit.)
+        """
+        copies, margins, palette, density = packet.data
+
+        top_margin = margins >> 4
+        bottom_margin = margins % 16
+        self.end_of_print = bool(bottom_margin)
+        if (
+            bottom_margin
+            or self.check_buffer_ready_to_print()
+        ):
+            self.ready_to_convert.set()
+            return True
+        return False
 
     def check_buffer_ready_to_print(self) -> bool:
         """Check if the buffer has 18 or more unprinted packets."""

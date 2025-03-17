@@ -142,6 +142,7 @@ class POSLink:
     async def pos_loop(self) -> None:
         while True:
             await self.data_buffer.ready_to_print.wait()
+            print('Skipping the actual print')
             if self.settings.no_scale:
                 zoom = 1
             elif self.settings.scale_2x:
@@ -149,15 +150,14 @@ class POSLink:
             else:
                 zoom = 3
             await self.send_ready_data(zoom)
-            self.data_buffer.print_complete.set()
             self.print_download_graphics_data(zoom)
             self.lcd.queue_message("Print complete!")
-            await asyncio.sleep(0)
-            utime.sleep(.5)            
+            await asyncio.sleep(.5)
             if self.settings.add_bottom_margin:
                 self.cut(feed_height=184)
             else:
                 self.cut()
+            self.data_buffer.print_complete.set()
         
     @utimeit.timeit
     async def send_ready_data(self, zoom: int = 3):
