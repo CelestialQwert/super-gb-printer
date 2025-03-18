@@ -21,10 +21,10 @@ class DIPManager():
 
     @property
     def scale_2x(self):
-        """Sets whether the print is scaled by 2x.
+        """Sets scaling to 2x (ebabled) or 3x (disabled).
         
-        Overrides the no scale setting when enabled.
-        """
+        The no_scale option below overrides it."""
+        
         return self.dip_switches[0].value()
     
     @property
@@ -42,16 +42,27 @@ class DIPManager():
         return self.dip_switches[2].value()
     
     @property
-    def cut_mode(self):
+    def disable_cuts(self):
         """Sets whether the print is automatically cut.
         
         Disable it when printing custom banners, such as with Donkey Kong
-        Country (which isn't working right now).
-
-        *****Currently unused*****
-        
+        Country (which isn't working right now).       
         """
         return self.dip_switches[3].value()
+    
+    @property
+    def page_break_mode(self):
+        """Sets when print occurs.
+
+        If disabled, printing occurs when the print buffer is full (2 pages).
+        This results in fewer page breaks, or none for smaller prints.
+        If enabled, printing occurs whenever a print command is sent from the
+        Game Boy. Results in more page breaks, but they may be better aligned
+        with what's being printed to be less annoying. 
+
+        *****Currently unused*****
+        """
+        return self.dip_switches[4].value()
 
 class ButtonManager():
     """Class ButtonManager

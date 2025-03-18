@@ -149,12 +149,18 @@ class GBLink:
     def check_timeout(self) -> None:
         """Check if the GB link has timed out.
         
-        Timeout is 3 seconds, after which the PIO is restarted, the current
-        packet and data buffer is discarded, and some other things are reset.
+        Timeout is 2 seconds, after which:
+        - The PIO is restarted
+        - Any unprinted data is printed (PIO waits for this to finish)
+        - Current packet and print buffer are reset
         """
         this_time = utime.ticks_ms()
-        if (utime.ticks_diff(this_time, self.last_packet_time) > 3000):
+        if (utime.ticks_diff(this_time, self.last_packet_time) > 2000):
             self.shutdown_pio_mach()
+            will_print = self.data_buffer.flush_print_buffer()
+            if will_print:
+                while not self.data_buffer.print_complete.check():
+                    pass
             self.startup_pio_mach()
         
     def initialize_emu_printer(self) -> None:
@@ -298,7 +304,8 @@ class GBLink:
         # )
 
         if self.packet.command == COMMAND_INIT:
-            self.initialize_emu_printer()
+            # self.initialize_emu_printer()
+            pass
 
         elif self.packet.command == COMMAND_DATA:
             if self.packet.data_length == 0:
@@ -320,7 +327,8 @@ class GBLink:
                     self.fake_print_ticks = 10
 
         elif self.packet.command == COMMAND_BREAK:
-            self.initialize_emu_printer()
+            # self.initialize_emu_printer()
+            pass
             
         elif self.packet.command == COMMAND_STATUS:
             if self.printer_status == PRINTER_PRINTING:

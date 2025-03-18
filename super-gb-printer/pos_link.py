@@ -16,14 +16,14 @@ import asyncio
 import utime
 from machine import UART, Pin
 from micropython import const
-from typing import Optional, Union
+from typing import Optional
+
 from ulab import numpy as np
 
 import data_buffer
 import lcd
 import pin_manager
 import pinout as pinn
-import query_flag
 import utimeit
 
 ROWS_PER_PACKET = const(16)
@@ -64,8 +64,8 @@ class POSLink:
         self.settings = in_sett if in_sett else pin_manager.DIPManager()
         self.leds = in_leds if in_leds else pin_manager.LEDManager()
         self.uart = UART(
-            0, baudrate=115200, tx=Pin(pinn.POS_TX), rx=Pin(pinn.POS_RX))
-        self.ready_to_print = query_flag.QueryThreadSafeFlag()
+            0, baudrate=115200, tx=Pin(pinn.POS_TX), rx=Pin(pinn.POS_RX)
+        )
         
         self.zoomed_lut = {
             2: np.zeros((256, 2), dtype=np.uint8),
@@ -74,7 +74,7 @@ class POSLink:
         }
         self.make_lut()
 
-
+        self.set_justification(1)
 
     def make_lut(self) -> None:
         """Creates look-up table for stretching out bits in a byte.
@@ -131,9 +131,9 @@ class POSLink:
         text_bytes = bytes(text, 'utf-8')
         self.uart.write(text_bytes + bytes([10])) #append line feed
         wait()
-        self.print()
+        self.print_command()
 
-    def print(self):
+    def print_command(self):
         """Send print command."""
         #                      GS  (   L   pL  pH   m  fn
         self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
@@ -142,24 +142,24 @@ class POSLink:
     async def pos_loop(self) -> None:
         while True:
             await self.data_buffer.ready_to_print.wait()
-            print('Skipping the actual print')
             if self.settings.no_scale:
                 zoom = 1
-            elif self.settings.scale_2x:
-                zoom = 2
             else:
-                zoom = 3
+                zoom = 2 if self.settings.scale_2x else 3
             await self.send_ready_data(zoom)
             self.print_download_graphics_data(zoom)
-            self.lcd.queue_message("Print complete!")
             await asyncio.sleep(.5)
-            if self.settings.add_bottom_margin:
-                self.cut(feed_height=184)
-            else:
-                self.cut()
             self.data_buffer.print_complete.set()
+            if not self.data_buffer.end_of_print:
+                self.lcd.queue_message("Page complete")
+            else:
+                self.lcd.queue_message("Print complete!")
+                if not self.settings.disable_cuts:
+                    if self.settings.add_bottom_margin:
+                        self.cut(feed_height=184)
+                    else:
+                        self.cut()
         
-    @utimeit.timeit
     async def send_ready_data(self, zoom: int = 3):
         """Send ready data from data buffer to printer.
 
@@ -171,6 +171,7 @@ class POSLink:
         buffer_slice = [x[:slice_h,:] for x in self.data_buffer.pos_buffer]
         await self.send_download_graphics_data(buffer_slice, zoom)
     
+    @utimeit.timeit
     async def send_download_graphics_data(
         self, full_payload: list[np.ndarray], zoom_x: int = 1, 
         zoom_y: int = -1, keycode: str = 'GB', 
@@ -238,7 +239,7 @@ class POSLink:
                     self.uart.write(tile_row_buffer.tobytes())
                     wait()
                 self.leds.pos_activity.off()
-        print('done')
+        # print('done')
 
     def send_download_graphics_data_header(
         self, x: int, y: int, num_tones: int = 4, keycode: str = 'GB'

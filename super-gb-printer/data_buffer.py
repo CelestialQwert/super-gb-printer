@@ -17,7 +17,7 @@ import lcd
 # the important nubmers that set how big the buffers are
 # most printable images are at most two screens tall, but what about all
 # the giant banners you can make in Super Mario Bros. Deluxe?
-NUM_GB_BUFFER_SCREENS = const(8)
+NUM_GB_BUFFER_SCREENS = const(3)
 NUM_POS_BUFFER_SCREENS = const(2)
 
 # constants to work out the size of data buffers
@@ -115,7 +115,7 @@ class DataBuffer():
 
         if self.received_packets == GB_DATA_BUFFER_DIMS:
             raise ValueError('GB packet buffer is full!')
-        packet_idx = self.received_packets
+        packet_idx = self.received_packets % NUM_PACKETS
         self.dma_copy_packet(packet.data, packet_idx)
         self.gb_compression_flag[packet_idx] = bool(packet.compression_flag)
         self.data_length[packet_idx] = packet.data_length
@@ -154,10 +154,11 @@ class DataBuffer():
             A bool which tells whether the print will occur or not. (If not,
             the GB link should fake a print for a bit.)
         """
-        copies, margins, palette, density = packet.data
+        copies, margins, palette, density = packet.data[:4]
 
         top_margin = margins >> 4
         bottom_margin = margins % 16
+        print(f"margins top:{top_margin} bottom:{bottom_margin}")
         self.end_of_print = bool(bottom_margin)
         if (
             bottom_margin
@@ -166,6 +167,17 @@ class DataBuffer():
             self.ready_to_convert.set()
             return True
         return False
+
+    def flush_print_buffer(self) -> bool:
+        """Check if there any unprinted data and print it.
+        
+        Made to run when the GB link times out."""
+        if self.received_packets > self.converted_packets:
+            self.end_of_print = True
+            self.ready_to_convert.set()
+            return True
+        return False
+
 
     def check_buffer_ready_to_print(self) -> bool:
         """Check if the buffer has 18 or more unprinted packets."""

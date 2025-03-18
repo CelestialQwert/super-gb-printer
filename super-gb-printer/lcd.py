@@ -45,7 +45,7 @@ class AsyncLCD():
             self.lcd.print(chr(0) + chr(1) + ' SUPER')
             self.lcd.set_cursor(0, 1)
             self.lcd.print(chr(2) + chr(3) + ' GB PRINTER')
-        print('To LCD: <Insert title screen here>')
+        print('For LCD: <Insert title screen here>')
     
     def queue_message(
             self, message: str, col: int = 0, row: int = 0, 
@@ -89,7 +89,7 @@ class AsyncLCD():
     def print(self, text: str):
         if self.is_real_lcd:
             self.lcd.print(text)
-        print(f"To LCD: {text}")
+        print(f"For LCD: {text}")
 
     def set_cursor(self, *args, **kwargs):
         if self.is_real_lcd:
