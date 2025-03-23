@@ -45,13 +45,14 @@ class DIPManager():
     def disable_cuts(self):
         """Sets whether the print is automatically cut.
         
-        Disable it when printing custom banners, such as with Donkey Kong
-        Country (which isn't working right now).       
+        If cuts are enabled (switch off), prints will automatically be cut if
+        the end of the print is detected (print command includes a bottom
+        margin). If cuts are disabled (switch on), the print is never cut.
         """
         return self.dip_switches[3].value()
     
     @property
-    def page_break_mode(self):
+    def force_print(self):
         """Sets when print occurs.
 
         If disabled, printing occurs when the print buffer is full (2 pages).
@@ -59,10 +60,9 @@ class DIPManager():
         If enabled, printing occurs whenever a print command is sent from the
         Game Boy. Results in more page breaks, but they may be better aligned
         with what's being printed to be less annoying. 
-
-        *****Currently unused*****
         """
         return self.dip_switches[4].value()
+
 
 class ButtonManager():
     """Class ButtonManager

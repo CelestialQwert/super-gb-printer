@@ -11,8 +11,10 @@ from micropython import const
 from typing import Optional
 from ulab import numpy as np
 
-import query_flag
 import lcd
+import pin_manager
+import query_flag
+
 
 # the important nubmers that set how big the buffers are
 # most printable images are at most two screens tall, but what about all
@@ -65,7 +67,11 @@ class DataBuffer():
     includes methods for manipulating data between different buffers.
     """
    
-    def __init__(self, in_lcd: Optional[lcd.AsyncLCD] = None) -> None:
+    def __init__(
+            self, 
+            in_lcd: Optional[lcd.AsyncLCD] = None,
+            in_settins: Optional[pin_manager.DIPManager] = None,
+        ) -> None:
         """Instantiate the class.
         
         Args:
@@ -73,6 +79,7 @@ class DataBuffer():
         """
 
         self.lcd = in_lcd if in_lcd else lcd.AsyncLCD()
+        self.settings = in_settins if in_settins else pin_manager.DIPManager()
 
         self.gb_buffer = np.zeros(GB_DATA_BUFFER_DIMS, dtype=np.uint8)
         self.decomp_buffer = np.zeros(PACKET_SIZE, dtype=np.uint8)
@@ -81,6 +88,8 @@ class DataBuffer():
         self.ready_to_print_packets = 0
         self.gb_compression_flag = [False] * NUM_PACKETS
         self.data_length = [0] * NUM_PACKETS
+        self.top_margin = 0
+        self.bottom_margin = 0
         self.end_of_print = True
         self.pos_buffer = [
             np.zeros(POS_BUFFER_DIMS, dtype=np.uint8),
@@ -90,7 +99,7 @@ class DataBuffer():
         ]
         self.ready_to_convert = query_flag.QueryThreadSafeFlag()
         self.ready_to_print = query_flag.QueryThreadSafeFlag()
-        self.print_complete = query_flag.QueryThreadSafeFlag()
+        self.processing_print = query_flag.QueryThreadSafeFlag()
 
         self.dma = rp2.DMA()
         self.dma_ctrl = self.dma.pack_ctrl()
@@ -156,15 +165,17 @@ class DataBuffer():
         """
         copies, margins, palette, density = packet.data[:4]
 
-        top_margin = margins >> 4
-        bottom_margin = margins % 16
-        print(f"margins top:{top_margin} bottom:{bottom_margin}")
-        self.end_of_print = bool(bottom_margin)
+        self.top_margin = margins >> 4
+        self.bottom_margin = margins % 16
+        print(f"margins top:{self.top_margin} bottom:{self.bottom_margin}")
+        self.end_of_print = bool(self.bottom_margin)
         if (
-            bottom_margin
+            self.bottom_margin
             or self.check_buffer_ready_to_print()
+            or self.settings.force_print
         ):
             self.ready_to_convert.set()
+            self.processing_print.set()
             return True
         return False
 
@@ -172,9 +183,12 @@ class DataBuffer():
         """Check if there any unprinted data and print it.
         
         Made to run when the GB link times out."""
+        if self.processing_print.check():
+            return False
         if self.received_packets > self.converted_packets:
-            self.end_of_print = True
+            self.end_of_print = bool(self.bottom_margin)
             self.ready_to_convert.set()
+            self.processing_print.set()
             return True
         return False
 

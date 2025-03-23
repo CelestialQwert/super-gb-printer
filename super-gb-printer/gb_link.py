@@ -158,9 +158,8 @@ class GBLink:
         if (utime.ticks_diff(this_time, self.last_packet_time) > 2000):
             self.shutdown_pio_mach()
             will_print = self.data_buffer.flush_print_buffer()
-            if will_print:
-                while not self.data_buffer.print_complete.check():
-                    pass
+            while self.data_buffer.processing_print.check():
+                pass
             self.startup_pio_mach()
         
     def initialize_emu_printer(self) -> None:
@@ -334,7 +333,8 @@ class GBLink:
             if self.printer_status == PRINTER_PRINTING:
                 if (
                     self.fake_printing
-                    or self.data_buffer.print_complete.check()
+                    # or if the real print is done
+                    or not self.data_buffer.processing_print.check()
                 ):
                     self.fake_print_ticks -= 1
                     if self.fake_print_ticks <= 0:
@@ -342,7 +342,6 @@ class GBLink:
                         if self.fake_printing:
                             self.lcd.queue_message('Fake print done')
                         self.fake_printing = False
-                        self.data_buffer.print_complete.clear()
             elif self.printer_status == PRINTER_COMPLETE:
                 self.printer_status = PRINTER_IDLE
                     

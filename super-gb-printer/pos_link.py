@@ -50,7 +50,8 @@ class POSLink:
             buffer: Optional[data_buffer.DataBuffer] = None,
             in_lcd: Optional[lcd.AsyncLCD] = None,
             in_sett: Optional[pin_manager.DIPManager] = None,
-            in_leds: Optional[pin_manager.LEDManager] = None
+            in_leds: Optional[pin_manager.LEDManager] = None,
+            in_btn: Optional[pin_manager.ButtonManager] = None
         ) -> None:
         """Instantiate the class.
         
@@ -63,9 +64,16 @@ class POSLink:
         self.lcd = in_lcd if in_lcd else lcd.AsyncLCD()
         self.settings = in_sett if in_sett else pin_manager.DIPManager()
         self.leds = in_leds if in_leds else pin_manager.LEDManager()
+        self.buttons = in_btn if in_btn else pin_manager.ButtonManager()
+
         self.uart = UART(
             0, baudrate=115200, tx=Pin(pinn.POS_TX), rx=Pin(pinn.POS_RX)
         )
+
+        self.manual_print_button = self.buttons.buttons[0]
+        self.last_button_state = 0
+        self.current_button_state = 0
+        self.last_print_has_margin = False
         
         self.zoomed_lut = {
             2: np.zeros((256, 2), dtype=np.uint8),
@@ -102,43 +110,7 @@ class POSLink:
             return n
         else:
             return (2**zoom) * POSLink.stretch(n // 2, zoom) + (n % 2)
-
-
-    def init_printer(self) -> None:
-        """Send printer init command."""
-        self.leds.pos_activity.off()
-        #                      ESC  @
-        self.uart.write(bytes([27, 64]))
-        wait()
-    
-    def set_justification(self, n: int) -> None:
-        """Send printer alignment command.
         
-        Args:
-            n: Alignment, one of the following values:
-                0, 48 - left
-                1, 49 - centered
-                2, 50 - right
-        """
-        # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/esc_la.html
-        #                      ESC a  n
-        self.uart.write(bytes([27, 97, n]))
-        wait()
-    
-    def print_text(self, text: str) -> None:
-        """Send text to the printer, then print command."""
-
-        text_bytes = bytes(text, 'utf-8')
-        self.uart.write(text_bytes + bytes([10])) #append line feed
-        wait()
-        self.print_command()
-
-    def print_command(self):
-        """Send print command."""
-        #                      GS  (   L   pL  pH   m  fn
-        self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
-        wait()
-
     async def pos_loop(self) -> None:
         while True:
             await self.data_buffer.ready_to_print.wait()
@@ -149,17 +121,37 @@ class POSLink:
             await self.send_ready_data(zoom)
             self.print_download_graphics_data(zoom)
             await asyncio.sleep(.5)
-            self.data_buffer.print_complete.set()
+            self.data_buffer.processing_print.clear()
             if not self.data_buffer.end_of_print:
                 self.lcd.queue_message("Page complete")
             else:
                 self.lcd.queue_message("Print complete!")
+                self.last_print_has_margin = self.settings.add_bottom_margin
+                if self.last_print_has_margin:
+                    self.feed(feed_height=184)
                 if not self.settings.disable_cuts:
-                    if self.settings.add_bottom_margin:
-                        self.cut(feed_height=184)
-                    else:
-                        self.cut()
-        
+                    self.cut()
+    
+    async def manual_cut_loop(self) -> None:
+        while True:
+            while True:
+                self.last_button_state = self.current_button_state
+                self.current_button_state = self.manual_print_button.value()
+                if (
+                    self.current_button_state
+                    and not self.last_button_state
+                    and not self.data_buffer.processing_print.check()
+                ):
+                    break
+                await asyncio.sleep_ms(100)
+            if (
+                self.settings.add_bottom_margin 
+                and not self.last_print_has_margin
+            ):
+                self.feed(feed_height=184)
+            self.cut()
+            await asyncio.sleep(2)
+
     async def send_ready_data(self, zoom: int = 3):
         """Send ready data from data buffer to printer.
 
@@ -171,7 +163,6 @@ class POSLink:
         buffer_slice = [x[:slice_h,:] for x in self.data_buffer.pos_buffer]
         await self.send_download_graphics_data(buffer_slice, zoom)
     
-    @utimeit.timeit
     async def send_download_graphics_data(
         self, full_payload: list[np.ndarray], zoom_x: int = 1, 
         zoom_y: int = -1, keycode: str = 'GB', 
@@ -312,11 +303,62 @@ class POSLink:
         self.uart.write(bytes([29, 40, 76,  6,  0, 48, 85, kc1, kc2, x, y]))
         wait()
 
+    def init_printer(self) -> None:
+        """Send printer init command."""
+        self.leds.pos_activity.off()
+        #                      ESC  @
+        self.uart.write(bytes([27, 64]))
+        wait()
+    
+    def set_justification(self, n: int) -> None:
+        """Send printer alignment command.
+        
+        Args:
+            n: Alignment, one of the following values:
+                0, 48 - left
+                1, 49 - centered
+                2, 50 - right
+        """
+        # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/esc_la.html
+        #                      ESC a  n
+        self.uart.write(bytes([27, 97, n]))
+        wait()
+    
+    def print_text(self, text: str) -> None:
+        """Send text to the printer, then print command."""
+
+        text_bytes = bytes(text, 'utf-8')
+        self.uart.write(text_bytes + bytes([10])) #append line feed
+        wait()
+        self.print_command()
+
+    def print_command(self):
+        """Send print command."""
+        #                      GS  (   L   pL  pH   m  fn
+        self.uart.write(bytes([29, 40, 76,  2,  0, 48, 50]))
+        wait()
+    
+    def feed(self, feed_height: int = 0):
+        """Send command to feed the paper.
+        
+        Args:
+            feed_height: 
+                Height of bottom margin before cut in increments of 
+                1/360 inches (that 360 is adjustable with GS P command).
+                A feed height of 184 is ~13 mm, plus the ~2 mm margin always
+                present after a cut, gives the same 15 mm margin that the top
+                of the print has (margin between cut and print heads).
+        """
+        # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/esc_cj.html
+        #                      ESC  J   n
+        self.uart.write(bytes([27, 74, feed_height % 256]))
+        wait()
+
     def cut(self, feed_height: int = 0):
         """Send command to cut the paper.
         
         Args:
-            fed_height: 
+            feed_height: 
                 Height of bottom margin before cut in increments of 
                 1/360 inches (that 360 is adjustable with GS P command).
                 A feed height of 184 is ~13 mm, plus the ~2 mm margin always
@@ -325,5 +367,5 @@ class POSLink:
         """
         # https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_cv.html
         #                      GS  V   m   n
-        self.uart.write(bytes([29, 86, 65, feed_height]))
+        self.uart.write(bytes([29, 86, 65, feed_height % 256]))
         wait()

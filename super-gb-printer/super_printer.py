@@ -38,8 +38,9 @@ class SuperPrinter():
         self.lcd = lcd.AsyncLCD(scl=pinn.LCD_SCL, sda=pinn.LCD_SDA)
         self.lcd.display_title_screen()
 
-        self.data_buffer = data_buffer.DataBuffer(self.lcd)
-        self.gb_link = gb_link.GBLink(self.data_buffer, self.lcd, self.leds)
+        self.data_buffer = data_buffer.DataBuffer(self.lcd, self.settings)
+        self.gb_link = gb_link.GBLink(
+            self.data_buffer, self.lcd, self.leds)
         self.pos_link = pos_link.POSLink(
             self.data_buffer, self.lcd, self.settings, self.leds
         )
@@ -53,8 +54,11 @@ class SuperPrinter():
         message_task = self.lcd.message_loop()
         convert_task = self.data_buffer.convert_loop()
         print_task = self.pos_link.pos_loop()
+        manual_cut_task = self.pos_link.manual_cut_loop()
         try:
-            await asyncio.gather(message_task, convert_task, print_task)
+            await asyncio.gather(
+                message_task, convert_task, print_task, manual_cut_task
+            )
         except Exception as e:
             self.thread_exception = e.__class__.__name__
             raise e

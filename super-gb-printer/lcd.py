@@ -35,7 +35,7 @@ class AsyncLCD():
         except (ValueError, OSError):
             print('Did not find LCD screen!')
             self.is_real_lcd = False
-        self.lcd.clear()
+        self.clear()
 
         self._queue = ThreadSafeQueue(20)
     
